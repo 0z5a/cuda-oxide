@@ -1,0 +1,151 @@
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use cuda_async::device_operation::DeviceOperation;
+use cutile::api;
+use cutile::core::f16;
+use cutile::tile_kernel::{IntoDeviceOperationPartition, TileKernel};
+use kernels::*;
+use cuda_core::CudaContext;
+use std::iter::zip;
+use std::time::{Duration, Instant};
+
+#[cutile::module]
+mod kernels {
+
+    use cutile::core::*;
+
+    #[cutile::entry(unchecked_accesses=true,
+                       optimization_hints = (
+                         tensor_dim_factor = 16,
+                         sm_120 = (num_cta_in_cga=2,),
+                       )
+    )]
+    unsafe fn gemm<T: ElementType, const BM: i32, const BN: i32, const BK: i32>(
+        z: &mut Tensor<T, { [BM, BN] }>,
+        x: &Tensor<T, { [-1, -1] }>,
+        y: &Tensor<T, { [-1, -1] }>,
+        k: i32,
+    ) {
+        let part_x = x.partition(const_shape![BM, BK]);
+        let part_y = y.partition(const_shape![BK, BN]);
+        let pid: (i32, i32, i32) = get_tile_block_id();
+        let mut tile_z: Tile<T, { [BM, BN] }> = z.load();
+        for i in 0i32..(k / BK) {
+            let tile_x = part_x.load([pid.0, i]);
+            let tile_y = part_y.load([i, pid.1]);
+            tile_z = mma(tile_x, tile_y, tile_z);
+        }
+        z.store(tile_z);
+    }
+    #[cutile::entry()]
+    unsafe fn gemm_no_opt<T: ElementType, const BM: i32, const BN: i32, const BK: i32>(
+        z: &mut Tensor<T, { [BM, BN] }>,
+        x: &Tensor<T, { [-1, -1] }>,
+        y: &Tensor<T, { [-1, -1] }>,
+        k: i32,
+    ) {
+        let part_x = x.partition(const_shape![BM, BK]);
+        let part_y = y.partition(const_shape![BK, BN]);
+        let pid: (i32, i32, i32) = get_tile_block_id();
+        let mut tile_z: Tile<T, { [BM, BN] }> = z.load();
+        for i in 0i32..(k / BK) {
+            let tile_x = part_x.load([pid.0, i]);
+            let tile_y = part_y.load([i, pid.1]);
+            tile_z = mma(tile_x, tile_y, tile_z);
+        }
+        z.store(tile_z);
+    }
+    #[cutile::entry(unchecked_accesses = true)]
+    unsafe fn gemm_no_opt_unchecked<T: ElementType, const BM: i32, const BN: i32, const BK: i32>(
+        z: &mut Tensor<T, { [BM, BN] }>,
+        x: &Tensor<T, { [-1, -1] }>,
+        y: &Tensor<T, { [-1, -1] }>,
+        k: i32,
+    ) {
+        let part_x = x.partition(const_shape![BM, BK]);
+        let part_y = y.partition(const_shape![BK, BN]);
+        let pid: (i32, i32, i32) = get_tile_block_id();
+        let mut tile_z: Tile<T, { [BM, BN] }> = z.load();
+        for i in 0i32..(k / BK) {
+            let tile_x = part_x.load([pid.0, i]);
+            let tile_y = part_y.load([i, pid.1]);
+            tile_z = mma(tile_x, tile_y, tile_z);
+        }
+        z.store(tile_z);
+    }
+}
+
+fn ocean_gemm(c: &mut Criterion) {
+    let mut group = c.benchmark_group("gemm");
+    group
+        .warm_up_time(Duration::from_millis(1000))
+        .sample_size(10usize.pow(2))
+        .measurement_time(Duration::from_millis(5000));
+
+    let ctx = CudaContext::new(0).expect("Failed to get context.");
+    let stream = ctx.new_stream().expect("Failed to get stream.");
+
+    let mut shapes = vec![];
+    for exponent in 0..6 {
+        // This is what the ocean benchmark uses.
+        let scale: usize = 2usize.pow(exponent);
+        let shape = (1024 * scale, 1024 * scale, 1024 * scale);
+        shapes.push(shape)
+    }
+    let hyper_params = vec![
+        ((128, 128, 64), 2),
+        ((256, 256, 64), 2),
+        ((256, 256, 64), 2),
+        ((256, 256, 64), 2),
+        ((256, 256, 64), 2),
+        ((256, 256, 64), 2),
+    ];
+    let slice = 0..6;
+    for (shape, (tile, _group_size_m)) in zip(&shapes[slice.clone()], &hyper_params[slice.clone()])
+    {
+        let (m, n, k) = *shape;
+        let (bm, bn, bk) = *tile;
+        let generics = vec![
+            "f16".to_string(),
+            bm.to_string(),
+            bn.to_string(),
+            bk.to_string(),
+        ];
+        let x = api::ones([m, k]).arc().sync_on(&stream).expect("Failed.");
+        let y = api::ones([k, n]).arc().sync_on(&stream).expect("Failed.");
+
+        let num_ops = (2 * m * n * k) as f64;
+        let label = n.to_string();
+        // This should report flops.
+        group.throughput(Throughput::Elements(num_ops as u64));
+        group.bench_with_input(BenchmarkId::new("N", &label), &label, |b, _size_mb| {
+            b.iter_custom(|iters| {
+                let mut z = api::zeros::<2, f16>([m, n])
+                    .partition([bm as i32, bn as i32])
+                    .sync_on(&stream)
+                    .expect("Failed.");
+                stream.synchronize().expect("Failed to synchronize.");
+                let start = Instant::now();
+                for _i in 0..iters {
+                    unsafe {
+                        let (local_z, _, _, _) = gemm_sync(z, x.clone(), y.clone(), k as i32)
+                            .generics(generics.clone())
+                            .async_on(&stream)
+                            .expect("Failed.");
+                        z = local_z;
+                    }
+                }
+                stream.synchronize().expect("Failed to synchronize.");
+                let res = start.elapsed();
+                res
+            });
+        });
+    }
+    group.finish();
+}
+
+criterion_group!(benches, ocean_gemm);
+criterion_main!(benches);

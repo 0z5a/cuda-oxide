@@ -1,0 +1,15 @@
+[package]
+name = "cuda-async"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+description = "Safe Async CUDA support via Async Rust."
+
+[dependencies]
+cuda-core = { workspace = true }
+futures = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }

@@ -1,0 +1,42 @@
+[package]
+name = "cutile-benchmarks"
+description = "cuTile Rust benchmarks."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+publish = false
+
+[dev-dependencies]
+criterion = { workspace = true }
+tokio = { workspace = true }
+
+[[bench]]
+name = "gemm"
+harness = false
+
+[[bench]]
+name = "fmha"
+harness = false
+
+[[bench]]
+name = "fmha_causal"
+harness = false
+
+[[bench]]
+name = "softmax"
+harness = false
+
+[[bench]]
+name = "rmsnorm"
+harness = false
+
+[dependencies]
+tokio = { workspace = true }
+cutile-compiler = { workspace = true }
+cuda-async = { workspace = true }
+cuda-core = { workspace = true }
+cutile = { workspace = true }
+cutile-examples = { workspace = true }

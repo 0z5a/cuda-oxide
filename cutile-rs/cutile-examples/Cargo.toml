@@ -1,0 +1,18 @@
+[package]
+name = "cutile-examples"
+description = "Various cuTile Rust usage examples."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+publish = false
+
+[dependencies]
+cutile-compiler = { workspace = true }
+cutile = { workspace = true }
+cuda-core = { workspace = true }
+cuda-async = { workspace = true }
+tokio = { workspace = true }
+candle-nn = { workspace = true }

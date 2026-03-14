@@ -1,0 +1,58 @@
+/*
+ * SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+use cuda_async::device_operation::DeviceOperation;
+use cuda_core::CudaContext;
+use cutile;
+use cutile::api::{rand_f32, randn_f32, zeros};
+use cutile::error::Error;
+use cutile::tensor::{IntoPartition, Partition, Tensor, ToHostVec};
+use std::sync::Arc;
+
+#[cutile::module]
+mod my_module {
+    use cutile::core::*;
+
+    #[cutile::entry()]
+    fn dropout<const S: [i32; 1]>(
+        p: f32,
+        _x: &Tensor<f32, { [-1] }>,
+        x_keep: &Tensor<f32, { [-1] }>,
+        out: &mut Tensor<f32, S>,
+    ) {
+        let zeros: Tile<f32, S> = constant(0.0, out.shape());
+        let ones: Tile<f32, S> = constant(1.0, out.shape());
+        let p_tile = p.broadcast(out.shape());
+        let x_keep_tile = load_tile_like_1d(x_keep, out);
+        // x_keep_tile is the probability of keeping (higher is more likely).
+        // p_tile is the probability of dropout (lower keeps more values).
+        let out_tile = select(gt_tile(x_keep_tile, p_tile), x_keep_tile, zeros);
+        // Rescale outputs based on dropout probability.
+        let out_tile = out_tile / (ones - p_tile);
+        out.store(out_tile);
+    }
+}
+
+use my_module::dropout_sync;
+
+fn main() -> Result<(), Error> {
+    let ctx = CudaContext::new(0)?;
+    let stream = ctx.new_stream()?;
+    let (m,) = (16,);
+    let bm = 4;
+    let p: f32 = 0.4;
+    let seed = 123;
+    let x: Arc<Tensor<f32>> = randn_f32(0.0, 1.0, [m], Some(seed))
+        .sync_on(&stream)?
+        .into();
+    let x_keep: Arc<Tensor<f32>> = rand_f32([m], Some(seed)).sync_on(&stream)?.into();
+    let out: Partition<Tensor<f32>> = zeros([m]).sync_on(&stream)?.partition([bm]);
+    let (_, _x, _x_keep, out) = dropout_sync(p, x, x_keep, out).sync_on(&stream)?;
+    let out_host: Vec<f32> = out.unpartition().to_host_vec().sync_on(&stream)?;
+    for i in 0..out_host.len() {
+        let x = out_host[i];
+        println!("{x:?}");
+    }
+    Ok(())
+}

@@ -1,0 +1,135 @@
+# cuTile Rust
+cuTile Rust (`cutile-rs`) is a research project providing a safe, tile-based kernel programming DSL for the Rust programming language.
+It features a safe host-side API for passing tensors to asynchronously executed kernel functions.
+
+# Project Status
+We are excited to release this research project as a demonstration of how GPU programming can be made available in the Rust ecosystem. The software is in an early stage (`-alpha`) and under active development: you should expect bugs, incomplete features, and API breakage as we work to improve it. That being said, we hope you'll be interested to try it in your work and help shape its direction by providing feedback on your experience.
+
+Please see the [Contributing.md](CONTRIBUTING.md) if you're interested in contributing to the project.
+
+# Setup
+
+## Requirements
+
+- **NVIDIA GPU** with `sm_80` or >= `sm_100` compute capability. `sm_90` is not yet supported.
+- **CUDA** 13.2.
+- **LLVM** 21 with MLIR.
+- **Rust** 1.75+ (nightly required for some features)
+- **Linux** (tested on Ubuntu 24.04)
+
+## Install
+
+### Rust
+
+To install Rust:
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+rustup default nightly
+```
+
+### CUDA
+
+Install CUDA 13.2 on your OS by following these instructions: https://developer.nvidia.com/cuda-downloads
+
+### LLVM
+
+To install LLVM-21 with MLIR (see [https://apt.llvm.org/](https://apt.llvm.org/) for details):
+```bash
+wget https://apt.llvm.org/llvm.sh
+chmod +x llvm.sh
+sudo ./llvm.sh 21
+sudo apt-get install libmlir-21-dev mlir-21-tools
+```
+
+## Configure Environment
+  - Set the env var `CUDA_TOOLKIT_PATH` to CUDA 13.2.
+  - Ensure `llvm-config` points to LLVM 21. Required by `melior`.
+  - Set the env var `CUDA_TILE_USE_LLVM_INSTALL_DIR` to llvm-21 (e.g. `/usr/lib/llvm-21`). Required by `cuda-tile-rs`.
+
+The environment needs access to `llvm-config` in order to resolve llvm (and mlir)-related dependencies.
+You can configure multiple llvm builds using `update-alternatives`:
+```bash
+sudo update-alternatives --install /usr/bin/llvm-config llvm-config /usr/lib/llvm-21/bin/llvm-config 1
+sudo update-alternatives --config llvm-config
+```
+
+Example `.env/config.toml`:
+```toml
+[env]
+CUDA_TOOLKIT_PATH = { value = "/usr/local/cuda-13", relative = false }
+CUDA_TILE_USE_LLVM_INSTALL_DIR = { value = "/usr/lib/llvm-21", relative = false }
+```
+
+### Building cuda-tile-rs
+
+This project depends on the cuda-tile MLIR dialect. Please follow the instructions [here](cuda-tile-rs/README.md) to set it up.
+
+## Verifying Installation
+
+Run the hello world example via `cargo run --example hello_world`.
+
+If everything works, you should see: `Hello, I am tile <0, 0, 0> in a kernel with <1, 1, 1> tiles.`
+
+# Quick Start
+
+```rust
+use cuda_async::device_operation::DeviceOperation;
+use cutile::{self, api, tile_kernel::IntoDeviceOperationPartition};
+use my_module::add_async as add;
+
+#[cutile::module]
+mod my_module {
+
+    use cutile::core::*;
+
+    #[cutile::entry()]
+    fn add<const S: [i32; 2]>(
+        z: &mut Tensor<f32, S>,
+        x: &Tensor<f32, { [-1, -1] }>,
+        y: &Tensor<f32, { [-1, -1] }>,
+    ) {
+        let tile_x = load_tile_like_2d(x, z);
+        let tile_y = load_tile_like_2d(y, z);
+        z.store(tile_x + tile_y);
+    }
+}
+
+fn main() -> () {
+    let x = api::ones([32, 32]).arc();
+    let y = api::ones([32, 32]).arc();
+    let z = api::zeros([32, 32]).partition([4, 4]);
+    let (_z, _x, _y) = add(z, x, y).sync();
+}
+```
+
+The above example defines a _device-side_ module named `my_module`, which contains the _tile kernel_ `add`. 
+The `add` kernel is marked as an _entry point_, allowing it to be executed from the _host-side_ (e.g. the `main` function).
+Our kernel is defined such that `x` and `y` are input tensors, and `z` is an output tensor.
+
+On the host-side, we allocate our device-side tensors `x`, `y` and `z`.
+The kernel indicates that `z` must be mutable. Since the same tile kernel executes in parallel by many tile threads, we will need a way to provide each tile thread exclusive access to `z`. It is enough to wrap `x` and `y` in an Arc (see [cuda-async](cuda-async) for details), however, the tensor `z` is partitioned into a grid of `4x4` sub-tensors. In cuTile Rust,
+any `&mut Tensor<...>` requires the host to pass a `Partition<Tensor<T>>` as the argument. Any `&Tensor<...>` requires the
+host to pass an `Arc<Tensor<...>>` as an argument.
+
+The expression `add(z, x, y)` constructs a representation of a _kernel launcher_: A structure which encodes how the GPU applies the kernel to the given arguments. By default, because we have partitioned `z` into a grid of `4x4` subtensors, the kernel launcher will pick a _launch grid_ of `(8, 8, 1)`. Each `(x, y, z)` coordinate in the launch grid corresponds to a _tile thread_.
+
+The `sync` method picks the default device on the system and synchronously JIT-compiles the kernel to the default device's architecture and immediately executes the kernel with the provided arguments.
+Before executing the user-defined kernel on the device-side, each tile thread is initialized by selecting 
+a distinct sub-tensor from the partitioning of `z` as the `&mut Tensor<...>` kernel parameter.
+Each tile thread has exclusive access to a distinct sub-tensor within the partition of `z`,
+allowing for safe parallel mutable access.
+
+- To run the above example, run `cargo run --example add_basic` within the `cutile-examples` crate.
+- More kernels and usage examples of the host-side API can be found here [here](cutile-examples/examples).
+
+# Tests
+- CUDA Tile dialect bindings: `cargo test --package cuda-tile-rs`
+- cuTile Rust Compiler: `cargo test --package cutile-compiler`
+- cuTile Rust Library: `cargo test --package cutile`
+- Examples: `bash cutile-examples/run.sh`
+- Benchmarks: `cargo bench`
+- Everything: `./scripts/run_all_tests.sh` (or pipe to a log file: `./scripts/run_all_tests.sh 2>&1 | tee test_run.log`)
+
+# License
+The `cuda-bindings` crate is licensed under NVIDIA Software License: [LICENSE-NVIDIA](LICENSE-NVIDIA).
+All other crates are licensed under the Apache License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0
