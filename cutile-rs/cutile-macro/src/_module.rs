@@ -227,7 +227,7 @@ fn module_inner(
     for item in &content.1 {
         match item {
             syn::Item::Use(use_item) => {
-                concrete_items.push(use_item.to_token_stream().into());
+                concrete_items.push(use_item.to_token_stream());
                 // Include module_ast dependency as part of the export.
                 if !is_core {
                     // println!("{use_item:#?}");
@@ -246,26 +246,26 @@ fn module_inner(
                     let module_ast_call_str = format!(
                         "{}::{}()",
                         module_ast_use_path.last().unwrap(),
-                        get_asts_ident().to_string()
+                        get_asts_ident()
                     );
                     module_ast_calls.push(module_ast_call_str);
                     let module_ast_use_path_str =
                         format!("use {};", module_ast_use_path.join("::"));
                     let module_ast_use_path_item =
                         syn::parse::<ItemUse>(module_ast_use_path_str.parse().unwrap()).unwrap();
-                    concrete_items.push(module_ast_use_path_item.to_token_stream().into());
+                    concrete_items.push(module_ast_use_path_item.to_token_stream());
                 }
             }
             syn::Item::Fn(function_item) => {
                 let entry_attrs = get_meta_list(
-                    format!("{} :: entry", tile_rust_crate_root.to_string()).as_str(),
+                    format!("{} :: entry", tile_rust_crate_root).as_str(),
                     &function_item.attrs,
                 );
                 if entry_attrs.is_some() {
-                    entry_functions.push(kernel_launcher(name, &function_item)?);
+                    entry_functions.push(kernel_launcher(name, function_item)?);
                 };
                 ast_content.push(Item::Fn(function_item.clone()));
-                concrete_items.push(function(function_item.clone(), &tile_rust_crate_root)?);
+                concrete_items.push(function(function_item.clone(), tile_rust_crate_root)?);
             }
             syn::Item::Struct(struct_item) => {
                 ast_content.push(Item::Struct(struct_item.clone()));
@@ -281,7 +281,7 @@ fn module_inner(
                 concrete_items.push(trait_(item_clone)?.into());
             }
             syn::Item::Type(type_item) => {
-                concrete_items.push(type_item.to_token_stream().into());
+                concrete_items.push(type_item.to_token_stream());
             }
             syn::Item::Impl(impl_item) => {
                 if !is_core {
@@ -297,22 +297,22 @@ fn module_inner(
                 }
                 ast_content.push(Item::Macro(macro_item.clone()));
                 let item_clone = macro_item.clone();
-                concrete_items.push(item_clone.to_token_stream().into());
+                concrete_items.push(item_clone.to_token_stream());
             }
             other => {
                 return other.err("Unsupported item type in module.");
             }
         }
     }
-    let ast_path = get_ast_path(&tile_rust_crate_root);
+    let ast_path = get_ast_path(tile_rust_crate_root);
     let ast_module_item: ItemMod = module_item.clone();
     let ast_module_tokens = module_asts(
         ast_module_item,
         module_ast_calls,
-        &tile_rust_crate_root,
+        tile_rust_crate_root,
         raw_item_source,
     );
-    let res = if entry_functions.len() == 0 {
+    let res = if entry_functions.is_empty() {
         quote! {
             pub mod #name {
                 #![allow(nonstandard_style)]
@@ -585,7 +585,7 @@ pub fn function(mut item: ItemFn, tile_rust_crate_root: &Ident) -> Result<TokenS
         &mut item.attrs,
     );
     clear_attributes(
-        HashSet::from([format!("{} :: entry", tile_rust_crate_root.to_string()).as_str()]),
+        HashSet::from([format!("{} :: entry", tile_rust_crate_root).as_str()]),
         &mut item.attrs,
     );
     let concrete_items = match attributes {
@@ -598,7 +598,7 @@ pub fn function(mut item: ItemFn, tile_rust_crate_root: &Ident) -> Result<TokenS
     let result = quote! {
         #(#concrete_items)*
     };
-    Ok(result.into())
+    Ok(result)
 }
 
 /// Generates the complete async kernel launcher struct and implementations.
@@ -636,7 +636,7 @@ pub fn kernel_launcher(module_ident: &Ident, item: &ItemFn) -> Result<TokenStrea
     let module_name = module_ident.to_string();
     let function_name = item.sig.ident.to_string();
     let function_entry_name = format!("{}_entry", function_name);
-    let launcher_name = format!("{}", function_name.to_case(Case::UpperCamel));
+    let launcher_name = function_name.to_case(Case::UpperCamel).to_string();
     let launcher_args_name = format!("{}Args", launcher_name);
     let unsafety = item.sig.unsafety;
 
@@ -748,7 +748,7 @@ pub fn kernel_launcher(module_ident: &Ident, item: &ItemFn) -> Result<TokenStrea
         let filename = format!("{module_name}_{function_name}_launcher.rs");
         let path = PathBuf::from(dir).join(filename);
         let contents = file_item_string_pretty(&file);
-        fs::write(path.clone(), contents).expect(format!("Failed to write {path:?}").as_str());
+        fs::write(path.clone(), contents).unwrap_or_else(|_| panic!("Failed to write {path:?}"));
         // Writes the string as bytes
     }
     Ok(result)
@@ -928,5 +928,5 @@ pub fn module_asts(
             module_asts
         }
     };
-    result.into()
+    result
 }
