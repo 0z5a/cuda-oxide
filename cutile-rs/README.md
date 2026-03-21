@@ -18,7 +18,7 @@ Please see [CONTRIBUTING.md](CONTRIBUTING.md) if you're interested in contributi
 - **NVIDIA GPU** with `sm_80` or >= `sm_100` compute capability. `sm_90` is not yet supported.
 - **CUDA** 13.2.
 - **LLVM** 21 with MLIR.
-- **Rust nightly**. Several crates in this workspace use nightly-only features.
+- **Rust** 1.89+
 - **Linux** (tested on Ubuntu 24.04)
 
 ## Install
@@ -28,8 +28,7 @@ Please see [CONTRIBUTING.md](CONTRIBUTING.md) if you're interested in contributi
 To install Rust:
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-rustup toolchain install nightly
-rustup default nightly
+rustup default stable
 ```
 
 ### CUDA
