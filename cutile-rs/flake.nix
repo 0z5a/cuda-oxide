@@ -193,20 +193,43 @@
           MLIR_SYS_210_PREFIX = "${llvmInstall}";
           TABLEGEN_210_PREFIX = "${llvmInstall}";
 
-          # add cuda to env vars
           shellHook = ''
             export PATH="${cudaToolkit}/bin:${llvmInstall}/bin:$PATH"
             export CMAKE_PREFIX_PATH="${llvmInstall}:$CMAKE_PREFIX_PATH"
 
-            # NixOS OpenGL/GPU driver path
+            # GPU driver libs: NixOS provides /run/opengl-driver/lib; on other
+            # distros, symlink just the NVIDIA libs into a temp dir so we don't
+            # pull in the host glibc.
             if [ -d /run/opengl-driver/lib ]; then
               export LD_LIBRARY_PATH="/run/opengl-driver/lib:$LD_LIBRARY_PATH"
+            else
+              _nv_drv_dir=$(mktemp -d /tmp/nix-nvidia-driver.XXXXXX)
+              for d in /usr/lib/x86_64-linux-gnu /lib/x86_64-linux-gnu /usr/lib /usr/lib64; do
+                if [ -e "$d/libcuda.so.1" ]; then
+                  for lib in "$d"/libcuda.so* "$d"/libnvidia-ptxjitcompiler.so* "$d"/libnvidia-gpucomp.so*; do
+                    [ -e "$lib" ] && ln -sf "$lib" "$_nv_drv_dir/"
+                  done
+                  break
+                fi
+              done
+              if [ -n "$(ls -A "$_nv_drv_dir" 2>/dev/null)" ]; then
+                export LD_LIBRARY_PATH="$_nv_drv_dir:$LD_LIBRARY_PATH"
+              else
+                rm -rf "$_nv_drv_dir"
+              fi
             fi
 
             if [ ! -d cuda-tile-rs/cuda-tile/.git ] && [ ! -f cuda-tile-rs/cuda-tile/CMakeLists.txt ]; then
               echo "Initializing cuda-tile submodule..."
               git submodule update --init --recursive
             fi
+
+            echo ""
+            echo "cutile-rs dev shell"
+            echo " ✓ CUDA  $CUDA_TOOLKIT_PATH"
+            echo " ✓ LLVM  $(llvm-config --version 2>/dev/null)"
+            echo " ✓ Rust  $(rustc --version 2>/dev/null | awk '{print $2}')"
+            echo ""
           '';
         };
       }
