@@ -297,6 +297,8 @@ cargo oxide run gemm_sol_final
 | `cuda-bindings`     | Raw `bindgen` FFI bindings to `cuda.h` (shared with cutile-rs)             |
 | `cuda-core`         | Safe RAII wrappers (`CudaContext`, `DeviceBuffer<T>`, ...); SIMT API under `cuda_core::simt` |
 | `cuda-async`        | Async layer (`DeviceOperation`, `DeviceBox<T>`, ...); SIMT API under `cuda_async::simt` |
+| `cute-layout`       | CuTe-style layout algebra and coordinate mapping                          |
+| `cute-rs`           | Typed CuTe tensors, tiles, copies, pipelines, and MMA operations           |
 | `libnvvm-sys`       | `dlopen` bindings to libNVVM (used by `cuda-host::ltoir`)                 |
 | `cuda-target-spec`  | Shared CUDA target parsing and recorded LLVM PTX-floor policy             |
 | `nvjitlink-sys`     | `dlopen` bindings to nvJitLink (used by `cuda-host::ltoir`)               |
@@ -310,6 +312,7 @@ cargo oxide run gemm_sol_final
 | `mir-importer`       | Rust MIR -> `dialect-mir` translation + pipeline      |
 | `mir-lower`          | `dialect-mir` -> LLVM dialect lowering                |
 | `dialect-mir`        | pliron dialect modelling Rust MIR                     |
+| `dialect-cute`       | Backend-neutral semantic IR for CuTe tensor programs  |
 | `dialect-iket`       | pliron dialect modelling in-kernel event tracing      |
 | `iket-lower`         | `dialect-iket` profiles + instrumentation lowering    |
 | `llvm-export`        | pliron-llvm shim + textual `.ll` exporter             |

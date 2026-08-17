@@ -484,6 +484,7 @@ name = "cuda-oxide-codegen"
 version = "0.1.0"
 dependencies = [
  "cuda-target-spec",
+ "dialect-cute",
  "dialect-iket",
  "dialect-mir",
  "dialect-nvvm",
@@ -505,6 +506,19 @@ name = "cuda-target-spec"
 version = "0.1.0"
 
 [[package]]
+name = "cute-layout"
+version = "0.1.0"
+
+[[package]]
+name = "cute-rs"
+version = "0.1.0"
+dependencies = [
+ "cuda-core",
+ "cuda-device",
+ "cute-layout",
+ "trybuild",
+]
+
 name = "dashmap"
 version = "6.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -516,6 +530,20 @@ dependencies = [
  "lock_api",
  "once_cell",
  "parking_lot_core",
+]
+
+[[package]]
+name = "dialect-cute"
+version = "0.1.0"
+dependencies = [
+ "combine",
+ "cute-layout",
+ "dialect-mir",
+ "linkme",
+ "once_cell",
+ "pliron",
+ "pliron-derive",
+ "thiserror",
 ]
 
 [[package]]
@@ -992,6 +1020,8 @@ version = "0.2.1"
 dependencies = [
  "combine",
  "cuda-oxide-codegen",
+ "cute-layout",
+ "dialect-cute",
  "dialect-iket",
  "dialect-mir",
  "dialect-nvvm",

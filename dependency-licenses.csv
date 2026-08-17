@@ -36,8 +36,11 @@ cuda-intrinsics-gen,0.1.0,Apache-2.0,Yes,local (workspace),1st Party (workspace)
 cuda-macros,0.2.1,Apache-2.0,Yes,local (workspace),1st Party (workspace),https://github.com/NVlabs/cuda-oxide.git,"Procedural macros for CUDA kernel development (#[kernel], #[device], etc.)",
 cuda-oxide-codegen,0.1.0,Apache-2.0,Yes,local (workspace),1st Party (workspace),https://github.com/NVlabs/cuda-oxide.git,Rustc-independent cuda-oxide PTX backend,
 cuda-target-spec,0.1.0,Apache-2.0,Yes,local (workspace),1st Party (workspace),https://github.com/NVlabs/cuda-oxide.git,Shared CUDA target parsing and recorded LLVM PTX-floor policy,
+cute-layout,0.1.0,Apache-2.0,Yes,local (workspace),1st Party (workspace),https://github.com/NVlabs/cuda-oxide.git,Coordinate-to-memory mapping and validation for CuTe-style GPU tiles,
+cute-rs,0.1.0,Apache-2.0,Yes,local (workspace),1st Party (workspace),https://github.com/NVlabs/cuda-oxide.git,"CuTe-style device library: Tensor, Layout types, partitioning, copy/mma atoms",
 dashmap,6.2.1,MIT,Yes,registry+https://github.com/rust-lang/crates.io-index,3rd Party (crates.io),https://github.com/xacrimon/dashmap,Blazing fast concurrent HashMap for Rust.,Pulled by the shared cuda-async (cutile-rs).
 device-only-kernels,0.0.0,Apache-2.0,Yes,local (workspace),1st Party (workspace),https://github.com/NVlabs/cuda-oxide.git,"INTERNAL: fixture for scripts/check-device-only-build.sh, proving the macro expansion resolves with no cuda-host in the graph. Not published.",Declares its own [workspace] so it resolves independently of the root lock.
+dialect-cute,0.1.0,Apache-2.0,Yes,local (workspace),1st Party (workspace),https://github.com/NVlabs/cuda-oxide.git,Semantic CuTe dialect for retained tensor layout and scheduling operations,
 dialect-iket,0.1.0,Apache-2.0,Yes,local (workspace),1st Party (workspace),https://github.com/NVlabs/cuda-oxide.git,Semantic IKET dialect for in-kernel event tracing,
 dialect-mir,0.2.1,Apache-2.0,Yes,local (workspace),1st Party (workspace),https://github.com/NVlabs/cuda-oxide.git,MIR dialect for pliron MLIR framework (Rust MIR representation),
 dialect-nvvm,0.2.1,Apache-2.0,Yes,local (workspace),1st Party (workspace),https://github.com/NVlabs/cuda-oxide.git,NVVM dialect for pliron MLIR framework (NVIDIA GPU intrinsics),
