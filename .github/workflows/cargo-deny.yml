@@ -7,10 +7,10 @@ name: cargo-deny
 #
 # Four parts of the same concern. `check` enforces the license *policy* over
 # the whole resolved graph from deny.toml, once per `[workspace]` root that
-# resolves third-party crates and is not an example: the root workspace,
-# crates/rustc-codegen-cuda, and the cuda-macros device-only fixture. Each
-# declares its own `[workspace]`, so each is a separate resolution the others
-# cannot reach. `license-manifest` enforces that
+# resolves third-party crates and is neither an example nor under cutile-rs:
+# the root workspace, crates/rustc-codegen-cuda, and the cuda-macros
+# device-only fixture. Each declares its own `[workspace]`, so each is a
+# separate resolution the others cannot reach. `license-manifest` enforces that
 # the human-readable inventory in dependency-licenses.csv still lists what the
 # workspace declares, which nothing checked before: CONTRIBUTING asks
 # contributors to update that file by hand, and it had fallen behind by eight
@@ -58,8 +58,8 @@ jobs:
       - name: Run cargo-deny over the codegen backend workspace
         run: cargo deny --manifest-path crates/rustc-codegen-cuda/Cargo.toml --locked check
 
-      # The fourth and last `[workspace]` root under version control that
-      # resolves third-party crates. `crates/cuda-macros/tests/device-only`
+      # The last `[workspace]` root this job runs.
+      # `crates/cuda-macros/tests/device-only`
       # declares its own `[workspace]` so that its graph provably excludes
       # cuda-host, which is the whole point of the fixture -- and that same
       # boundary puts it outside the root run above, outside the backend run,
@@ -68,10 +68,18 @@ jobs:
       # proc-macro2, quote and syn at versions that appear nowhere in the root
       # lock, so those three (name, version) pairs were governed by no policy
       # at all. It passes today: advisories ok, bans ok, licenses ok, sources
-      # ok. (crates/fuzzer/rustlantis is the fifth `[workspace]` root and is
-      # deliberately not here: it is a vendored upstream project, not
+      # ok. (crates/fuzzer/rustlantis is another `[workspace]` root
+      # and is deliberately not here: it is a vendored upstream project, not
       # first-party code, and bringing its graph under deny.toml is a policy
-      # call rather than a gap.)
+      # call rather than a gap. The cutile-rs roots -- cutile-rs/Cargo.toml and
+      # the four paper benchmarks under cutile-rs/cutile-benchmarks/paper --
+      # are out for the same kind of reason: cutile-rs is a nested import of a
+      # separate product that carries its own cutile-rs/deny.toml, so Oxide's
+      # policy is not the one that judges it. To bring them in one day, add a
+      # `cargo deny --manifest-path <root> --locked check` step per root here,
+      # and drop the matching CUTILE_ROOT filter in
+      # scripts/check-dependency-licenses.sh so the inventory half
+      # covers them too.)
       - name: Run cargo-deny over the cuda-macros device-only fixture
         run: cargo deny --manifest-path crates/cuda-macros/tests/device-only/Cargo.toml --locked check
 

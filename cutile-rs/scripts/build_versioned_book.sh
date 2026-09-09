@@ -12,8 +12,8 @@ SPHINX_BUILD="${SPHINX_BUILD:-sphinx-build}"
 OUT_DIR="${CUTILE_DOCS_SITE_DIR:-$REPO_ROOT/_site}"
 MAIN_REF="${CUTILE_DOCS_MAIN_REF:-HEAD}"
 MAIN_VERSION="${CUTILE_DOCS_MAIN_VERSION:-main}"
-TAG_PATTERN="${CUTILE_DOCS_TAG_PATTERN:-v*}"
-BASE_URL="${CUTILE_DOCS_BASE_URL:-/cutile-rs/}"
+TAG_PATTERN="${CUTILE_DOCS_TAG_PATTERN:-cutile-rs/v*}"
+BASE_URL="${CUTILE_DOCS_BASE_URL:-/cuda-oxide/cutile-rs/}"
 
 if [[ "$BASE_URL" != /* ]]; then
     BASE_URL="/$BASE_URL"
@@ -64,7 +64,14 @@ def version_url(version: str) -> str:
     return f"{base_url}{version}/"
 
 def display_version(ref: str) -> str:
-    return ref[1:] if ref.startswith("v") else ref
+    # Monorepo tags are cutile-rs/v0.2.0 → directory/switcher name 0.2.0.
+    prefix = "cutile-rs/"
+    if not ref.startswith(prefix):
+        raise SystemExit(f"expected cutile-rs/ namespaced tag, got {ref!r}")
+    version = ref[len(prefix):]
+    if not version.startswith("v"):
+        raise SystemExit(f"expected leading v after {prefix}, got {ref!r}")
+    return version[1:]
 
 versions = [
     {
@@ -115,7 +122,13 @@ build_ref() {
         WORKTREES+=("$src")
     fi
 
-    if [[ ! -f "$src/cutile-book/conf.py" ]]; then
+    local book_src=""
+    if [[ -f "$src/cutile-book/conf.py" ]]; then
+        book_src="$src/cutile-book"
+    elif [[ -f "$src/cutile-rs/cutile-book/conf.py" ]]; then
+        # Namespaced tags were rewritten under cutile-rs/ by filter-repo.
+        book_src="$src/cutile-rs/cutile-book"
+    else
         echo "Skipping $version: cutile-book/conf.py not found at $ref" >&2
         return
     fi
@@ -123,7 +136,7 @@ build_ref() {
     echo "Building cuTile book for $version ($ref)"
     CUTILE_DOCS_VERSION="$version" \
     CUTILE_DOCS_SWITCHER_JSON="${BASE_URL}_static/versions.json" \
-        "$SPHINX_BUILD" -b html "$src/cutile-book" "$out"
+        "$SPHINX_BUILD" -b html "$book_src" "$out"
 
     # Older tags may enable sphinx-sitemap with unversioned URLs. The versioned
     # Pages layout does not need per-version sitemap files.
@@ -137,7 +150,12 @@ build_ref "$MAIN_REF" "$MAIN_VERSION"
 
 for tag in "${TAGS[@]}"; do
     [[ -n "$tag" ]] || continue
-    version="${tag#v}"
+    # cutile-rs/v0.2.0 → 0.2.0 (must match display_version() above).
+    if [[ "$tag" != cutile-rs/v* ]]; then
+        echo "expected cutile-rs/v* tag, got: $tag" >&2
+        exit 1
+    fi
+    version="${tag#cutile-rs/v}"
     build_ref "$tag" "$version"
 done
 

@@ -1,11 +1,26 @@
 ---
-name: pr
+# Port of cutile-rs/.github/workflows/pr.yml for the monorepo.
+# cutile-rs remains a nested Cargo workspace until workspace membership is
+# reconciled, so cargo/script steps run under cutile-rs.
+# Checkout does not init submodules. cuda-tile-rs is outside default-members,
+# and these CUDA images have no git until the setup action, so
+# `submodules: recursive` makes actions/checkout reject the REST API fallback.
+name: cutile-rs-pr
 
 on:
+  # Self-hosted runners (linux-amd64-cpu16) cannot run on pull_request events —
+  # see https://docs.gha-runners.nvidia.com/pull-request-testing/. Instead,
+  # copy-pr-bot mirrors trusted PRs to pull-request/<n> and we trigger on that
+  # push (config: .github/copy-pr-bot.yaml).
+  #
+  # No paths: filter. GitHub applies one paths list to every branch in this
+  # push block, and copy-pr-bot creates pull-request/<n> at an existing SHA,
+  # which often has no path changes and would skip the workflow.
   push:
     branches:
       - main
       - "pull-request/[0-9]+"
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref_name }}
@@ -17,6 +32,7 @@ permissions:
 defaults:
   run:
     shell: bash -eou pipefail {0}
+    working-directory: cutile-rs
 
 jobs:
   # Exercise the oldest Tile IR assembler, including its lack of
@@ -33,7 +49,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup
+      - uses: ./cutile-rs/.github/actions/setup
       - name: Verify assembler
         run: |
           "$CUTILE_TILEIRAS_PATH" --version
@@ -57,7 +73,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup
+      - uses: ./cutile-rs/.github/actions/setup
       - name: Verify assembler version
         run: |
           command -v tileiras || apt-get install -y -qq --no-install-recommends cuda-tileiras-13-4
@@ -76,14 +92,16 @@ jobs:
       CUDA_TOOLKIT_PATH: /usr/local/cuda
     timeout-minutes: 30
     steps:
+      # Before checkout, so this cannot use the cutile-rs working directory.
       - name: Verify CUDA toolchain
+        working-directory: ${{ github.workspace }}
         run: |
           nvcc --version
           command -v tileiras
           tileiras --help | grep -q "sm_120"
 
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup
+      - uses: ./cutile-rs/.github/actions/setup
 
       # Cheapest checks first so a formatting or lint slip fails in seconds.
       - name: Format check
@@ -119,7 +137,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup
+      - uses: ./cutile-rs/.github/actions/setup
 
       # Prebuilt binary instead of `cargo install` (which compiled the tool
       # from source on every run).
@@ -149,7 +167,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup
+      - uses: ./cutile-rs/.github/actions/setup
 
       - name: Check shared crates against CUDA 13.0
         run: cargo check -p cuda-bindings -p cuda-core -p cuda-async --all-targets
@@ -178,7 +196,7 @@ jobs:
       - uses: actions/checkout@v7
 
       # This nightly must ship clippy, miri, and rust-src on x86_64.
-      - uses: ./.github/actions/setup
+      - uses: ./cutile-rs/.github/actions/setup
         with:
           components: clippy miri rust-src
 

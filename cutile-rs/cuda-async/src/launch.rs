@@ -160,12 +160,25 @@ impl KernelArgStorage {
                 ..
             } => {
                 let base = values.as_mut_ptr();
-                let mut ptrs: [*mut c_void; INLINE_SLOTS] = [std::ptr::null_mut(); INLINE_SLOTS];
-                for (ptr, &offset) in ptrs.iter_mut().zip(&offsets[..*args_len]) {
+                // Uninitialized until written. A null fill would be a real
+                // pointer value, and the slice passed to `f` must contain
+                // only the pointers written below.
+                let mut ptrs: [MaybeUninit<*mut c_void>; INLINE_SLOTS] =
+                    [const { MaybeUninit::uninit() }; INLINE_SLOTS];
+                for (slot, &offset) in ptrs.iter_mut().zip(&offsets[..*args_len]) {
                     // SAFETY: every offset was a valid slot index at push time.
-                    *ptr = unsafe { base.add(offset as usize) } as *mut c_void;
+                    slot.write(unsafe { base.add(offset as usize) } as *mut c_void);
                 }
-                f(&mut ptrs[..*args_len])
+                // SAFETY: the prefix of length `args_len` was written above,
+                // and `args_len` is at most `INLINE_SLOTS`. `MaybeUninit<T>`
+                // has the same layout as `T`.
+                let ptrs = unsafe {
+                    std::slice::from_raw_parts_mut(
+                        ptrs.as_mut_ptr().cast::<*mut c_void>(),
+                        *args_len,
+                    )
+                };
+                f(ptrs)
             }
             Self::Heap { values, offsets } => {
                 let base = values.as_mut_ptr();

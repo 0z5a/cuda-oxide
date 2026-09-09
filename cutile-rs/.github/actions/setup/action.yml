@@ -20,6 +20,7 @@ runs:
   steps:
     - name: Validate inputs
       shell: bash
+      working-directory: cutile-rs
       env:
         RUST_COMPONENTS: ${{ inputs.components }}
         RUST_CACHE: ${{ inputs.cache }}
@@ -35,14 +36,17 @@ runs:
 
     - name: Install build dependencies
       shell: bash
+      working-directory: cutile-rs
       run: |
         apt-get update -qq
         apt-get install -y -qq --no-install-recommends build-essential curl \
           ca-certificates git cmake pkg-config libclang-dev zlib1g-dev libzstd-dev
 
-    # Use the checkout's stable pin unless the job selects a different toolchain.
+    # Use cutile-rs/rust-toolchain.toml. The repo-root pin is the Oxide nightly,
+    # and rustup walks up from the working directory.
     - name: Install Rust
       shell: bash
+      working-directory: cutile-rs
       env:
         RUST_COMPONENTS: ${{ inputs.components }}
       run: |
@@ -67,5 +71,6 @@ runs:
       with:
         # One cache per job: the CUDA image differs per lane and bindgen output
         # with it, so artifacts are not interchangeable across lanes.
+        workspaces: cutile-rs
         key: ${{ github.job }}
         cache-on-failure: true
