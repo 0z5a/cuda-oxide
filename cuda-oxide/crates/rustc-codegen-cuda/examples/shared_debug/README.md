@@ -9,7 +9,7 @@ Build and validate the retained LLVM debug graph:
 
 ```bash
 CUDA_OXIDE_DEBUG=full cargo oxide build shared_debug --arch sm_120
-./crates/rustc-codegen-cuda/examples/shared_debug/verify-debug-info.sh
+./cuda-oxide/crates/rustc-codegen-cuda/examples/shared_debug/verify-debug-info.sh
 ```
 
 Run the per-block semantics check:

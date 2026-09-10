@@ -44,9 +44,10 @@ pub struct Context {
 /// Resolve the workspace root and backend, or exit with a helpful error.
 ///
 /// Supports two modes:
-/// - **Workspace mode**: CWD is inside the cuda-oxide repo (detected by
-///   `crates/rustc-codegen-cuda` directory). Examples are resolved from the
-///   workspace examples directory.
+/// - **Workspace mode**: CWD is inside the cuda-oxide repo (detected by the
+///   flat `crates/rustc-codegen-cuda` path or the combined repository's
+///   `cuda-oxide/crates/rustc-codegen-cuda` path). Examples are resolved from
+///   the workspace examples directory.
 /// - **Standalone mode**: CWD has a `Cargo.toml` but is not inside the
 ///   workspace. The backend is built from the commit the project's cuda-oxide
 ///   dependency resolves to, or taken from the shared cache when that already
@@ -54,7 +55,7 @@ pub struct Context {
 ///   operate on the current directory directly.
 pub fn resolve_context() -> Context {
     if let Some(workspace_root) = backend::find_workspace_root() {
-        let codegen_crate = workspace_root.join("crates/rustc-codegen-cuda");
+        let codegen_crate = backend::codegen_crate_path(&workspace_root);
         let examples_dir = codegen_crate.join("examples");
         let config = load_oxide_config(&workspace_root);
         let backend_so = backend::find_or_build_backend(&workspace_root, config.backend.as_deref());
@@ -104,7 +105,7 @@ pub fn resolve_context() -> Context {
 /// `run`/`build`/`pipeline`/`setup` still build the backend on demand.
 pub fn resolve_passive_context() -> Context {
     if let Some(workspace_root) = backend::find_workspace_root() {
-        let codegen_crate = workspace_root.join("crates/rustc-codegen-cuda");
+        let codegen_crate = backend::codegen_crate_path(&workspace_root);
         let examples_dir = codegen_crate.join("examples");
         let config = load_oxide_config_lenient(&workspace_root);
         let backend_so = backend::backend_so_candidate(&workspace_root, config.backend.as_deref());

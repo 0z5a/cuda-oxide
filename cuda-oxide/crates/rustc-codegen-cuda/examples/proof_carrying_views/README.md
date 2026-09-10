@@ -49,7 +49,7 @@ it does not claim stronger vector alignment without a separate proof.
 
 ```bash
 cargo oxide build proof_carrying_views
-crates/rustc-codegen-cuda/examples/proof_carrying_views/target/release/proof_carrying_views --verify-ptx
+cuda-oxide/crates/rustc-codegen-cuda/examples/proof_carrying_views/target/release/proof_carrying_views --verify-ptx
 ```
 
 The verifier needs no GPU. It checks that the safe and raw entries keep the

@@ -884,7 +884,7 @@ Tests should verify at least:
 The repository integration tests provide executable examples:
 
 ```text
-crates/cuda-host/tests/kernel_family.rs
+cuda-oxide/crates/cuda-host/tests/kernel_family.rs
 ```
 
 Run them with:
@@ -992,10 +992,10 @@ compiled shape is incompatible with the matrix dimensions.
 
 See:
 
-* [`gemm_sol_final`](https://github.com/NVlabs/cuda-oxide/tree/main/crates/rustc-codegen-cuda/examples/gemm_sol_final)
-* [`KernelFamily` integration tests](https://github.com/NVlabs/cuda-oxide/blob/main/crates/cuda-host/tests/kernel_family.rs)
-* [`cuda-host` kernel-family implementation](https://github.com/NVlabs/cuda-oxide/blob/main/crates/cuda-host/src/kernel_family.rs)
-* [`cuda-host` README](https://github.com/NVlabs/cuda-oxide/blob/main/crates/cuda-host/README.md)
+* [`gemm_sol_final`](https://github.com/NVlabs/cuda-oxide/tree/main/cuda-oxide/crates/rustc-codegen-cuda/examples/gemm_sol_final)
+* [`KernelFamily` integration tests](https://github.com/NVlabs/cuda-oxide/blob/main/cuda-oxide/crates/cuda-host/tests/kernel_family.rs)
+* [`cuda-host` kernel-family implementation](https://github.com/NVlabs/cuda-oxide/blob/main/cuda-oxide/crates/cuda-host/src/kernel_family.rs)
+* [`cuda-host` README](https://github.com/NVlabs/cuda-oxide/blob/main/cuda-oxide/crates/cuda-host/README.md)
 
 ## Design guidelines
 

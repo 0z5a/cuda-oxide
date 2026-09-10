@@ -17,7 +17,7 @@ The compiler must reject the signature at compile time instead:
 cargo oxide build error_kernel_shared_param
 ```
 
-Expected diagnostic (pinned by `scripts/smoketest.sh`):
+Expected diagnostic (pinned by `cuda-oxide/scripts/smoketest.sh`):
 
 ```text
 is a pointer into shared memory

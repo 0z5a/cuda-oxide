@@ -85,7 +85,7 @@ intrinsics/catalog.json   "schema": 46  (serialized catalog format)
 
 - `schema` (in `overlay.toml`) identifies the overlay **input** format the
   generator accepts (`OVERLAY_SCHEMA` in
-  `crates/cuda-intrinsics-gen/src/resolve/overlay.rs`); the resolver rejects
+  `cuda-oxide/crates/cuda-intrinsics-gen/src/resolve/overlay.rs`); the resolver rejects
   a mismatched manifest. It is not the catalog format version.
 - `catalog_version` identifies the reviewed catalog contract.
 - `intrinsic_abi` identifies the intrinsic ABI generation whose stable entries
@@ -147,7 +147,7 @@ intrinsics/overlay/<family>.toml
 ```
 
 The overlay is the hand-edited policy input. Do not edit the corresponding
-operation under `crates/dialect-nvvm/src/ops/generated/`, the generated
+operation under `cuda-oxide/crates/dialect-nvvm/src/ops/generated/`, the generated
 importer dispatch, generated lowering tables, or `intrinsics/catalog.json`.
 
 If the contribution requires a **new overlay shard**, also add that shard to
@@ -218,9 +218,9 @@ Then inspect the working tree and diff before running broader checks:
 ```bash
 git status --short
 git diff --stat
-git diff -- intrinsics crates/cuda-intrinsics crates/cuda-device \
-  crates/dialect-nvvm crates/mir-importer crates/mir-lower \
-  crates/cuda-oxide-codegen crates/rustc-codegen-cuda
+git diff -- intrinsics cuda-oxide/crates/cuda-intrinsics cuda-oxide/crates/cuda-device \
+  cuda-oxide/crates/dialect-nvvm cuda-oxide/crates/mir-importer cuda-oxide/crates/mir-lower \
+  cuda-oxide/crates/cuda-oxide-codegen cuda-oxide/crates/rustc-codegen-cuda
 ```
 
 Check `git status --short` as well: newly created overlay or evidence files are
@@ -238,7 +238,7 @@ The repository provides one local entry point for the generated-intrinsics CI
 contract:
 
 ```bash
-just check-intrinsics upstream/main
+just -f cuda-oxide/Justfile check-intrinsics upstream/main
 ```
 
 Use the actual PR base if it is not `upstream/main`.
@@ -252,7 +252,7 @@ cuda-intrinsics-gen probe --all --skip-terminal --per-target
 cuda-intrinsics-gen check-abi-history --base-ref <base>
 ```
 
-Use `just check-intrinsics ...` as the normal contributor interface rather than
+Use `just -f cuda-oxide/Justfile check-intrinsics ...` as the normal contributor interface rather than
 copying the underlying commands into scripts. The recipe can evolve when the
 CI contract gains additional coverage.
 
@@ -278,7 +278,7 @@ that also update the book:
 
 ```bash
 just book
-bash scripts/check-book-api-names.sh
+bash cuda-oxide/scripts/check-book-api-names.sh
 git diff --check
 ```
 
@@ -293,13 +293,13 @@ not model, the change is no longer a small catalog admission.
 A new generated shape typically involves generator code such as:
 
 ```text
-crates/cuda-intrinsics-gen/src/model/
-crates/cuda-intrinsics-gen/src/resolve/
-crates/cuda-intrinsics-gen/src/render/
+cuda-oxide/crates/cuda-intrinsics-gen/src/model/
+cuda-oxide/crates/cuda-intrinsics-gen/src/resolve/
+cuda-oxide/crates/cuda-intrinsics-gen/src/render/
 ```
 
-and may also require real compiler lowering changes under `crates/mir-lower/`
-or `crates/dialect-nvvm/`.
+and may also require real compiler lowering changes under `cuda-oxide/crates/mir-lower/`
+or `cuda-oxide/crates/dialect-nvvm/`.
 
 Keep that work separate from routine catalog admission when possible. The ABI
 ledger and generated-intrinsics validation contract still apply.
@@ -327,9 +327,9 @@ ABI ledger, and evidence the explicit cuda-oxide policy layer.
 For a catalog-generated intrinsic, do not directly edit:
 
 - `intrinsics/catalog.json`;
-- generated files under `crates/cuda-intrinsics/src/generated/`;
-- generated files under `crates/cuda-device/src/generated/`;
-- generated files under `crates/dialect-nvvm/src/ops/generated/`;
+- generated files under `cuda-oxide/crates/cuda-intrinsics/src/generated/`;
+- generated files under `cuda-oxide/crates/cuda-device/src/generated/`;
+- generated files under `cuda-oxide/crates/dialect-nvvm/src/ops/generated/`;
 - generated intrinsic dispatch in `mir-importer`;
 - generated intrinsic conversion tables in `mir-lower`;
 - generated target/collector metadata;

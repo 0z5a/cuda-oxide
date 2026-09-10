@@ -54,7 +54,7 @@ stagger. Not a bad return on a handful of `Arc::clone()` calls.
 
 ## Project structure
 
-The example lives at `crates/rustc-codegen-cuda/examples/async_mlp/` and is a
+The example lives at `cuda-oxide/crates/rustc-codegen-cuda/examples/async_mlp/` and is a
 standalone Cargo workspace member:
 
 ```text

@@ -74,7 +74,7 @@ gemm_views --bench             # GPU: benchmark only
 ```
 
 (The built binary lands in
-`crates/rustc-codegen-cuda/examples/gemm_views/target/release/`.)
+`cuda-oxide/crates/rustc-codegen-cuda/examples/gemm_views/target/release/`.)
 
 `--verify-ptx` checks that no compile-time contract markers leak into the
 module, that no kernel contains a `trap` instruction, that the naive pair
@@ -94,7 +94,7 @@ These numbers depend on the pipeline disabling llc's late branch folding:
 LLVM 23 started rewriting loop branches into a single negated conditional,
 which ptxas's SASS unroller does not recognize, and the naive kernels lose
 about a quarter of their throughput. The rationale and measurements live
-on `DISABLE_BRANCH_FOLD` in `crates/cuda-oxide-codegen/src/ptx.rs`.
+on `DISABLE_BRANCH_FOLD` in `cuda-oxide/crates/cuda-oxide-codegen/src/ptx.rs`.
 
 For scale: the `gemm` example (plain `a[i]`, checked on every read) runs
 the same problem at roughly 2940 GFLOPS. Removing the per-read checks

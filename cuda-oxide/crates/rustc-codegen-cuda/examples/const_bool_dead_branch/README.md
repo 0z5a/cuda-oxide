@@ -19,7 +19,7 @@ proves that two live, disagreeing pointer spaces remain generic.
 ```bash
 cargo oxide run const_bool_dead_branch
 CUDA_OXIDE_NO_OPT=1 cargo oxide run const_bool_dead_branch
-./crates/rustc-codegen-cuda/examples/const_bool_dead_branch/verify-code-shape.sh
+./cuda-oxide/crates/rustc-codegen-cuda/examples/const_bool_dead_branch/verify-code-shape.sh
 ```
 
 The code-shape check requires the `.ll` and `.ptx` artifacts left by

@@ -238,4 +238,4 @@ convenience. The table is the whole `pub use cuda_macros::{...}` list in
 
 - [cuda-host](../cuda-host/) -- host-side launch infrastructure
 - [cuda-macros](../cuda-macros/) -- proc-macro implementations
-- [cuda-core](../cuda-core/) -- CUDA driver API bindings
+- [cuda-core](../../../cuda-core/) -- CUDA driver API bindings

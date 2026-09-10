@@ -13,4 +13,4 @@ By default, the book will be locally hosted at `http://127.0.0.1:8000/`
 ## Related Documentation
 
 - **API Docs**: Run `cargo doc --open` from the project root
-- **Examples**: See `crates/rustc-codegen-cuda/examples/`
+- **Examples**: See `cuda-oxide/crates/rustc-codegen-cuda/examples/`

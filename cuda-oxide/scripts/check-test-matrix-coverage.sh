@@ -43,8 +43,8 @@ export LC_ALL=C
 
 cd "$(dirname "$0")/.."
 
-MANIFEST=Cargo.toml
-WORKFLOW=.github/workflows/unit-tests.yml
+MANIFEST=../Cargo.toml
+WORKFLOW=../.github/workflows/unit-tests.yml
 JUSTFILE=Justfile
 
 if ! command -v python3 >/dev/null 2>&1; then

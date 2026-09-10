@@ -15,7 +15,7 @@ loaded at runtime by name.
 Marks a function as a CUDA kernel. Generates:
 1. An entry point renamed into the reserved `cuda_oxide_kernel_<hash>_<name>` namespace
    (with `#[no_mangle]`) so the codegen backend can find it. The hash makes the prefix
-   unguessable for user code; see `crates/reserved-oxide-symbols/` for the contract.
+   unguessable for user code; see `cuda-oxide/crates/reserved-oxide-symbols/` for the contract.
 2. Host lookup metadata used by typed launch APIs.
 3. For a generic kernel, a readable `<name>_ptx_name::<...>()` helper. Generated
    marker types are internal plumbing and should not be named by application code.
@@ -530,4 +530,4 @@ src/
 
 - [cuda-device](../cuda-device/) -- re-exports these macros for convenience
 - [cuda-host](../cuda-host/) -- `CudaKernel` / `GenericCudaKernel` traits used by generated code
-- [cuda-core](../cuda-core/) -- `launch_kernel` / `launch_kernel_ex` called by generated code
+- [cuda-core](../../../cuda-core/) -- `launch_kernel` / `launch_kernel_ex` called by generated code

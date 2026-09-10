@@ -41,7 +41,7 @@ without creating a CUDA context:
 
 ```bash
 cargo oxide build const_generic
-./crates/rustc-codegen-cuda/examples/const_generic/target/release/const_generic \
+./cuda-oxide/crates/rustc-codegen-cuda/examples/const_generic/target/release/const_generic \
   --verify-ptx
 ```
 

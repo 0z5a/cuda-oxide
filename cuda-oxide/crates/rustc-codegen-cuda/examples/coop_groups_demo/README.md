@@ -140,7 +140,7 @@ Output buffer layout for reduce/scan kernels:
 
 ```bash
 # After running once, the .ptx lives next to the binary:
-less crates/rustc-codegen-cuda/examples/coop_groups_demo/coop_groups_demo.ptx
+less cuda-oxide/crates/rustc-codegen-cuda/examples/coop_groups_demo/coop_groups_demo.ptx
 ```
 
 Useful greps:

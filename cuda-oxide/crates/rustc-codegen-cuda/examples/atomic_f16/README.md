@@ -21,7 +21,7 @@ The default binary checks:
 ## Benchmark
 
 ```bash
-./crates/rustc-codegen-cuda/examples/atomic_f16/run-bench.sh
+./cuda-oxide/crates/rustc-codegen-cuda/examples/atomic_f16/run-bench.sh
 ```
 
 The GPU architecture is auto-detected; pass `--arch sm_XX` to override.

@@ -17,7 +17,7 @@ shape gate:
 
 ```bash
 CUDA_OXIDE_DEBUG=full cargo oxide build device_global --arch sm_120
-./crates/rustc-codegen-cuda/examples/device_global/verify-debug-info.sh
+./cuda-oxide/crates/rustc-codegen-cuda/examples/device_global/verify-debug-info.sh
 ```
 
 For a live cuda-gdb lookup, stop inside the `device_global` kernel and keep the

@@ -129,7 +129,7 @@ example; rebuilding avoids accidentally comparing against a stale cuBLASLt
 version:
 
 ```bash
-cd crates/rustc-codegen-cuda/examples/gemm_sol_final/bench
+cd cuda-oxide/crates/rustc-codegen-cuda/examples/gemm_sol_final/bench
 bash build.sh
 ```
 

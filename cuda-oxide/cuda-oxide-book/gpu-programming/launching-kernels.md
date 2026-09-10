@@ -441,7 +441,7 @@ generated beside the kernel function.
 ### Complete example
 
 The
-[`policy_config`](https://github.com/NVlabs/cuda-oxide/tree/main/crates/rustc-codegen-cuda/examples/policy_config)
+[`policy_config`](https://github.com/NVlabs/cuda-oxide/tree/main/cuda-oxide/crates/rustc-codegen-cuda/examples/policy_config)
 example defines two policies for one generic kernel and verifies that they
 produce:
 
@@ -457,7 +457,7 @@ Build and inspect the generated artifacts without a GPU:
 cargo oxide build policy_config
 
 cargo run --release \
-  --manifest-path crates/rustc-codegen-cuda/examples/policy_config/Cargo.toml \
+  --manifest-path cuda-oxide/crates/rustc-codegen-cuda/examples/policy_config/Cargo.toml \
   -- --verify-ptx
 ```
 

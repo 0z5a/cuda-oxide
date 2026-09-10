@@ -88,7 +88,7 @@ pub(crate) fn reject_reserved_name(name: &Ident) -> Option<TokenStream> {
             "function name `{name_str}` starts with the reserved cuda-oxide \
              prefix `{RESERVED_ROOT}`; rename your function — this namespace \
              is reserved for cuda-oxide internal symbol mangling \
-             (see crates/reserved-oxide-symbols)"
+             (see cuda-oxide/crates/reserved-oxide-symbols)"
         );
         Some(syn::Error::new(name.span(), msg).to_compile_error().into())
     } else {

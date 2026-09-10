@@ -27,8 +27,10 @@ set -euo pipefail
 export LC_ALL=C
 
 cd "$(dirname "$0")/.."
+GIT_ROOT="$(git rev-parse --show-toplevel)"
+cd "${GIT_ROOT}"
 
-CSV=dependency-licenses.csv
+CSV=cuda-oxide/dependency-licenses.csv
 
 require_tool() {
     if ! command -v "$1" >/dev/null 2>&1; then
@@ -102,13 +104,13 @@ print("\n".join(sorted(names)))
 # second half covers.  Today that is three, and how each got here matters:
 #
 #   1. Cargo.toml -- the root workspace.
-#   2. crates/rustc-codegen-cuda/Cargo.toml -- its own `[workspace]` for the
+#   2. cuda-oxide/crates/rustc-codegen-cuda/Cargo.toml -- its own `[workspace]` for the
 #      rustc-private dylibs, so `-p` from the root cannot reach it and the root
 #      `cargo metadata` stops at that boundary.  That is how the backend crate
 #      itself, the largest first-party crate in the tree, sat unrecorded while
 #      every other member had a row.  This is the second pass asked for in the
 #      #662 review.
-#   3. crates/cuda-macros/tests/device-only/Cargo.toml -- the fixture for
+#   3. cuda-oxide/crates/cuda-macros/tests/device-only/Cargo.toml -- the fixture for
 #      scripts/check-device-only-build.sh.  It declares `[workspace]` on
 #      purpose: the point is a graph that does *not* contain `cuda-host`
 #      (#701/#702), so it must resolve independently rather than share the root
@@ -119,15 +121,15 @@ print("\n".join(sorted(names)))
 #      fall behind what a workspace declares.  Both halves need all three roots.
 FIRST_PARTY_WORKSPACE_ROOTS=(
     Cargo.toml
-    crates/rustc-codegen-cuda/Cargo.toml
-    crates/cuda-macros/tests/device-only/Cargo.toml
+    cuda-oxide/crates/rustc-codegen-cuda/Cargo.toml
+    cuda-oxide/crates/cuda-macros/tests/device-only/Cargo.toml
 )
 
 # The vendored rustlantis subtree also declares `[workspace]`. It is
 # third-party code attributed in THIRD_PARTY_NOTICES, its dependencies are not
 # ours to record, and check-spdx-headers.sh excludes it for the same reason.
 VENDORED_WORKSPACE_ROOTS=(
-    crates/fuzzer/rustlantis/Cargo.toml
+    cuda-oxide/crates/fuzzer/rustlantis/Cargo.toml
 )
 
 # Ask Cargo which workspace owns every tracked manifest. This handles valid
@@ -137,7 +139,7 @@ VENDORED_WORKSPACE_ROOTS=(
 #   Cargo.toml -> Cargo workspace root
 #                      |-- named first-party or vendored root
 #                      `-- example root with a tracked Cargo.lock
-EXAMPLES_ROOT=crates/rustc-codegen-cuda/examples
+EXAMPLES_ROOT=cuda-oxide/crates/rustc-codegen-cuda/examples
 all_workspace_roots="$(
     git ls-files -z -- '*Cargo.toml' |
         while IFS= read -r -d '' manifest; do
@@ -266,7 +268,7 @@ echo "OK: ${CSV} records all $(printf '%s\n' "${required}" | grep -c .) declared
 # ---------------------------------------------------------------------------
 # Second half: the example workspaces.
 #
-# Every example under crates/rustc-codegen-cuda/examples/ sets its own
+# Every example under cuda-oxide/crates/rustc-codegen-cuda/examples/ sets its own
 # [workspace], so neither `cargo deny check` nor the check above resolves any
 # of them -- both stop at the root workspace boundary.  Most examples declare
 # only path dependencies on first-party crates and so bring nothing new, but a
@@ -311,10 +313,10 @@ def packages(path):
     return out
 
 covered = set()
-for lock in ("Cargo.lock", "crates/rustc-codegen-cuda/Cargo.lock"):
+for lock in ("Cargo.lock", "cuda-oxide/crates/rustc-codegen-cuda/Cargo.lock"):
     covered |= {name for name, _ in packages(lock)}
 
-with open("dependency-licenses.csv", newline="") as handle:
+with open("cuda-oxide/dependency-licenses.csv", newline="") as handle:
     next(handle, None)
     covered |= {line.split(",")[0].strip().strip("\r") for line in handle if line.strip()}
 
@@ -324,7 +326,7 @@ locks = sorted(sys.argv[separator + 1:])
 if len(locks) < 20:
     sys.exit("parse self-test failed: found %d example lock files" % len(locks))
 
-examples_root = "crates/rustc-codegen-cuda/examples"
+examples_root = "cuda-oxide/crates/rustc-codegen-cuda/examples"
 
 def example_of(lock):
     """Top-level example directory a lockfile belongs to, however deep it sits."""

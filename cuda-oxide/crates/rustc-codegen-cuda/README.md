@@ -43,7 +43,7 @@ fn main() {
 
 The backend implements rustc's `CodegenBackend` trait. When rustc calls `codegen_crate()`:
 
-1. **Collect** -- `collector.rs` scans codegen units for functions prefixed with `cuda_oxide_kernel_<hash>_` (set by the `#[kernel]` proc-macro -- the prefix is owned by `crates/reserved-oxide-symbols/`, the workspace-internal source of truth for the cuda-oxide naming contract). It then walks the MIR call graph to gather all transitively reachable device functions.
+1. **Collect** -- `collector.rs` scans codegen units for functions prefixed with `cuda_oxide_kernel_<hash>_` (set by the `#[kernel]` proc-macro -- the prefix is owned by `cuda-oxide/crates/reserved-oxide-symbols/`, the workspace-internal source of truth for the cuda-oxide naming contract). It then walks the MIR call graph to gather all transitively reachable device functions.
 2. **Compile device code** -- `device_codegen.rs` feeds the collected MIR through
    the cuda-oxide pipeline: translate to `dialect-mir`, run `mem2reg`, apply
    annotated unrolling, lower and export to LLVM IR, then compile PTX with `llc`.

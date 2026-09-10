@@ -32,19 +32,20 @@
 set -euo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
+GIT_ROOT="$(git rev-parse --show-toplevel)"
 
-# Files whose host-API spellings a reader copies. Retired-crate directories
-# no longer exist, so no exclusion is needed for them.
-mapfile -t files < <(git ls-files \
+# Files whose host-API spellings a reader copies. `git ls-files` paths are
+# repository-relative; grep them from the git root.
+mapfile -t files < <(git -C "${GIT_ROOT}" ls-files \
     README.md CONTRIBUTING.md \
-    'cuda-oxide-book/*.md' 'cuda-oxide-book/**/*.md' \
-    'crates/*/README.md' \
-    'crates/rustc-codegen-cuda/examples/*/README.md' \
-    'crates/rustc-codegen-cuda/examples/*/*/README.md' \
-    'crates/cargo-oxide/src/**/*.rs' 'crates/cargo-oxide/src/*.rs' \
-    'crates/cuda-host/src/**/*.rs' 'crates/cuda-host/src/*.rs' \
-    'crates/cuda-macros/src/**/*.rs' 'crates/cuda-macros/src/*.rs' \
-    'crates/cuda-device/src/**/*.rs' 'crates/cuda-device/src/*.rs' \
+    'cuda-oxide/cuda-oxide-book/*.md' 'cuda-oxide/cuda-oxide-book/**/*.md' \
+    'cuda-oxide/crates/*/README.md' \
+    'cuda-oxide/crates/rustc-codegen-cuda/examples/*/README.md' \
+    'cuda-oxide/crates/rustc-codegen-cuda/examples/*/*/README.md' \
+    'cuda-oxide/crates/cargo-oxide/src/**/*.rs' 'cuda-oxide/crates/cargo-oxide/src/*.rs' \
+    'cuda-oxide/crates/cuda-host/src/**/*.rs' 'cuda-oxide/crates/cuda-host/src/*.rs' \
+    'cuda-oxide/crates/cuda-macros/src/**/*.rs' 'cuda-oxide/crates/cuda-macros/src/*.rs' \
+    'cuda-oxide/crates/cuda-device/src/**/*.rs' 'cuda-oxide/crates/cuda-device/src/*.rs' \
     | sort -u)
 
 # Each pattern is an ERE; `cuda_core::simt::...` never matches because the
@@ -59,10 +60,10 @@ patterns=(
 
 status=0
 for pattern in "${patterns[@]}"; do
-    if hits="$(grep -n -E -- "${pattern}" "${files[@]}" 2>/dev/null)"; then
+    if hits="$(grep -n -E -- "${pattern}" "${files[@]/#/${GIT_ROOT}/}" 2>/dev/null)"; then
         status=1
         echo "error: host-API path that does not resolve on the shared crates (/${pattern}/):" >&2
-        echo "${hits}" | sed 's/^/    /' >&2
+        echo "${hits}" | sed "s|^${GIT_ROOT}/||; s/^/    /" >&2
     fi
 done
 

@@ -6,6 +6,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::backend;
+
 use super::*;
 
 // =============================================================================
@@ -39,10 +41,7 @@ pub fn format_all(ctx: &Context, check: bool) {
     // Its own `[workspace]`, so neither run above reaches it and the examples
     // walk below never sees it either. The gate carries a dedicated step for
     // exactly this reason.
-    let fixture = ctx
-        .workspace_root
-        .join("crates")
-        .join("cuda-macros")
+    let fixture = backend::simt_crate_path(&ctx.workspace_root, "cuda-macros")
         .join("tests")
         .join("device-only");
     if fixture.join("Cargo.toml").is_file() {

@@ -341,7 +341,7 @@ fields are internal details and may change.
 The `mir-transforms` crate keeps reusable analysis separate from IR mutation:
 
 ```text
-crates/mir-transforms/src/
+cuda-oxide/crates/mir-transforms/src/
 ├── analyses/
 │   ├── loop_info.rs      # which blocks belong to each loop?
 │   └── induction.rs      # what are the counter, step, bound, and trip count?

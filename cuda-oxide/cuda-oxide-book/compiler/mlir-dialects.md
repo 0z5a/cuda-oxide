@@ -84,7 +84,7 @@ the GPU memory hierarchy:
 ### Operations
 
 `dialect-mir` defines 62 operations across 12 categories, one per module under
-`crates/dialect-mir/src/ops/`:
+`cuda-oxide/crates/dialect-mir/src/ops/`:
 
 | Category     | Examples                                                                                                                                                                                            | Count |
 | :----------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----: |
@@ -227,7 +227,7 @@ names are intentionally the same as their LLVM counterparts, prefixed with
 ### The Export Engine
 
 The crown jewel of `llvm-export` is its export module
-(`crates/llvm-export/src/export/`) -- the code that converts a pliron IR
+(`cuda-oxide/crates/llvm-export/src/export/`) -- the code that converts a pliron IR
 module into valid textual LLVM IR. This is the part cuda-oxide keeps local:
 pliron-llvm only emits real `.ll` via an `llvm-sys` bridge, which cuda-oxide
 avoids. This is not just "print each operation"; several non-trivial
@@ -310,7 +310,7 @@ because it decides where -- and whether -- you would add one. If the header
 stamp no longer starts with `016c9d9b`, the counts on this page predate the
 catalog you are reading.
 
-**Hand-written**, directly under `crates/dialect-nvvm/src/ops/`. These are the
+**Hand-written**, directly under `cuda-oxide/crates/dialect-nvvm/src/ops/`. These are the
 ops with bespoke verification or lowering that the intrinsic catalog does not
 describe. There are seven modules and 26 operations:
 

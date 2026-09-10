@@ -7,15 +7,15 @@ intrinsic pipeline. `MANAGED_GENERATED_ROOTS` in `src/generate.rs` lists the
 nine directories it owns, where `generate` writes outputs and removes stale
 marker-bearing files:
 
-- `crates/cuda-intrinsics/src/generated/`: the raw intrinsic declarations;
-- `crates/cuda-device/src/generated/`: the safe device wrapper modules;
-- `crates/dialect-nvvm/src/ops/generated/`: the `dialect-nvvm` ops;
-- `crates/mir-importer/src/translator/terminator/intrinsics/`: the importer
+- `cuda-oxide/crates/cuda-intrinsics/src/generated/`: the raw intrinsic declarations;
+- `cuda-oxide/crates/cuda-device/src/generated/`: the safe device wrapper modules;
+- `cuda-oxide/crates/dialect-nvvm/src/ops/generated/`: the `dialect-nvvm` ops;
+- `cuda-oxide/crates/mir-importer/src/translator/terminator/intrinsics/`: the importer
   dispatch arms that recognize each intrinsic by name (the enclosing
-  `crates/mir-importer/src` is listed as a root of its own);
-- one generated file each in `crates/cuda-oxide-codegen/src` (target
-  requirements), `crates/mir-lower/src/convert` (conversion interfaces), and
-  `crates/rustc-codegen-cuda/src` (collector predicates);
+  `cuda-oxide/crates/mir-importer/src` is listed as a root of its own);
+- one generated file each in `cuda-oxide/crates/cuda-oxide-codegen/src` (target
+  requirements), `cuda-oxide/crates/mir-lower/src/convert` (conversion interfaces), and
+  `cuda-oxide/crates/rustc-codegen-cuda/src` (collector predicates);
 - `intrinsics/probes/`: the per-intrinsic PTX probe evidence.
 
 Generated files carry a

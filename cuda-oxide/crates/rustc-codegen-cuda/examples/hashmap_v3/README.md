@@ -40,7 +40,7 @@ What v2 had that v3 dropped (with the empirical reason):
 cargo oxide run hashmap_v3
 
 # Performance bench vs CPU `hashbrown::HashMap`:
-./crates/rustc-codegen-cuda/examples/hashmap_v3/run-bench.sh
+./cuda-oxide/crates/rustc-codegen-cuda/examples/hashmap_v3/run-bench.sh
 # (or directly: cargo oxide run hashmap_v3 --bin bench)
 ```
 

@@ -867,8 +867,15 @@ fn main() {
                 eprintln!("Error: could not locate cargo-oxide executable: {error}");
                 std::process::exit(1);
             });
+            let simt_root = ctx
+                .codegen_crate
+                .parent()
+                .and_then(std::path::Path::parent)
+                .expect("codegen crate must live under the SIMT crates directory")
+                .to_path_buf();
             let options = ptx_schedule::campaign::CampaignOptions {
                 workspace_root: ctx.workspace_root,
+                simt_root,
                 oxide_binary,
                 example,
                 seed_start,

@@ -38,8 +38,21 @@ use std::process::{Command, Stdio};
 /// identifies the checkout: they ship in a single repository.
 const CUDA_OXIDE_CRATES: &[&str] = &["cuda-device", "cuda-host", "cuda-macros"];
 
-/// The backend crate, relative to a cuda-oxide checkout root.
+/// The backend crate, relative to a historical (flat) cuda-oxide checkout root.
 pub const CODEGEN_CRATE_SUBDIR: &str = "crates/rustc-codegen-cuda";
+
+/// The backend crate in the combined repository, relative to the git root.
+pub const NESTED_CODEGEN_CRATE_SUBDIR: &str = "cuda-oxide/crates/rustc-codegen-cuda";
+
+/// Returns the codegen crate in either supported repository layout.
+pub fn codegen_crate_in_checkout(root: &Path) -> PathBuf {
+    let nested = root.join(NESTED_CODEGEN_CRATE_SUBDIR);
+    if nested.is_dir() {
+        nested
+    } else {
+        root.join(CODEGEN_CRATE_SUBDIR)
+    }
+}
 
 /// The cuda-oxide checkout a project's dependency resolves to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,7 +81,7 @@ impl DependencySource {
 
     /// The backend crate inside the checkout.
     pub fn codegen_crate(&self) -> PathBuf {
-        self.checkout().join(CODEGEN_CRATE_SUBDIR)
+        codegen_crate_in_checkout(self.checkout())
     }
 
     /// The commit the checkout is at, for git dependencies.
@@ -206,7 +219,12 @@ fn git_source_rev(source: &str) -> Option<&str> {
 fn checkout_root(manifest: &Path) -> Option<PathBuf> {
     let mut dir = manifest.parent()?;
     loop {
-        if dir.join(CODEGEN_CRATE_SUBDIR).join("Cargo.toml").is_file() {
+        if dir.join(CODEGEN_CRATE_SUBDIR).join("Cargo.toml").is_file()
+            || dir
+                .join(NESTED_CODEGEN_CRATE_SUBDIR)
+                .join("Cargo.toml")
+                .is_file()
+        {
             return Some(dir.to_path_buf());
         }
         if dir.join(".git").exists() || dir.join(".cargo-ok").exists() {

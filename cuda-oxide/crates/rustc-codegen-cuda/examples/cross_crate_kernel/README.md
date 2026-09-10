@@ -34,7 +34,7 @@ without creating a CUDA context:
 
 ```bash
 cargo oxide build cross_crate_kernel
-./crates/rustc-codegen-cuda/examples/cross_crate_kernel/target/release/cross_crate_kernel \
+./cuda-oxide/crates/rustc-codegen-cuda/examples/cross_crate_kernel/target/release/cross_crate_kernel \
   --verify-ptx
 ```
 
@@ -120,7 +120,7 @@ fn main() {
 The codegen backend:
 
 1. Finds `cuda_oxide_kernel_<hash>_scale` marked with `#[kernel]` attribute (the
-   `<hash>` is the fixed `246e25db_` suffix owned by `crates/reserved-oxide-symbols/`)
+   `<hash>` is the fixed `246e25db_` suffix owned by `cuda-oxide/crates/reserved-oxide-symbols/`)
 2. Discovers all monomorphizations: `scale::<f32>`, `scale::<i32>`, etc.
 3. Generates unique PTX entry points: `scale_TID_<hex32>`, one entry per
    monomorphization (see "Generic Kernel Naming" below)

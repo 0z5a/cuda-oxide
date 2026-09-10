@@ -153,13 +153,23 @@ fn current_ledger_paths(repo_root: &Path) -> Result<BTreeSet<String>> {
 fn git_ledger_paths(repo_root: &Path, base_ref: &str) -> Result<BTreeSet<String>> {
     let output = Command::new("git")
         .current_dir(repo_root)
-        .args(["ls-tree", "-r", "--name-only", base_ref, "--", "intrinsics"])
+        .args([
+            "ls-tree",
+            "-r",
+            "--name-only",
+            base_ref,
+            "--",
+            ":(top)intrinsics",
+            ":(top)cuda-oxide/intrinsics",
+        ])
         .output()
         .with_context(|| format!("list ABI ledgers in {base_ref}"))?;
     ensure!(output.status.success(), "git ls-tree failed for {base_ref}");
     Ok(String::from_utf8(output.stdout)
         .context("git ls-tree returned non-UTF-8 paths")?
         .lines()
+        .map(|path| path.trim_start_matches("../"))
+        .map(|path| path.strip_prefix("cuda-oxide/").unwrap_or(path))
         .filter(|path| is_ledger_path(path))
         .map(str::to_owned)
         .collect())
@@ -172,12 +182,20 @@ fn read_current_ledger(repo_root: &Path, relative: &str) -> Result<AbiLedgerFile
 }
 
 fn read_git_ledger(repo_root: &Path, base_ref: &str, relative: &str) -> Result<AbiLedgerFile> {
-    let object = format!("{base_ref}:{relative}");
-    let output = Command::new("git")
+    let mut object = format!("{base_ref}:cuda-oxide/{relative}");
+    let mut output = Command::new("git")
         .current_dir(repo_root)
         .args(["show", &object])
         .output()
         .with_context(|| format!("read {object}"))?;
+    if !output.status.success() {
+        object = format!("{base_ref}:{relative}");
+        output = Command::new("git")
+            .current_dir(repo_root)
+            .args(["show", &object])
+            .output()
+            .with_context(|| format!("read {object}"))?;
+    }
     ensure!(output.status.success(), "git show {object} failed");
     let text = String::from_utf8(output.stdout).context("base ABI ledger is not UTF-8")?;
     toml::from_str(&text).with_context(|| format!("parse {object}"))

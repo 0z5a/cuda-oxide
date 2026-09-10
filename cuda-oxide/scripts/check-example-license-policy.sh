@@ -157,7 +157,7 @@ echo "Checking deny.toml over ${total} representative example workspaces" \
     "across ${locks} example lock files."
 
 # No --config: cargo-deny resolves the config by walking up from the manifest
-# directory, so every example workspace finds the repository-root deny.toml.
+# directory, so every example workspace finds cuda-oxide/deny.toml.
 # (Verified on cargo-deny 0.19 and 0.20; a top-level --config flag only exists
 # on 0.20.)  --locked so a stale lock file fails the run instead of being
 # silently re-resolved: the committed lock is what grouped the workspace, so it

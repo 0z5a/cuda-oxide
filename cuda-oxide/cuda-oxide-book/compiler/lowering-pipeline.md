@@ -33,7 +33,7 @@ become pointer-length pairs. Checked addition becomes an LLVM overflow
 intrinsic followed by an extract. Every Rust concept gets flattened to
 something LLVM can digest.
 
-The pass that does all of this lives in `crates/mir-lower/` and uses pliron's
+The pass that does all of this lives in `cuda-oxide/crates/mir-lower/` and uses pliron's
 `DialectConversion` framework. It is the single largest transformation in the
 pipeline, and the rest of this chapter is about how it works.
 

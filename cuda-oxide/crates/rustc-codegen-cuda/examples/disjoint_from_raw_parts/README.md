@@ -35,7 +35,7 @@ cargo oxide run disjoint_from_raw_parts
 To run the repository smoketest:
 
 ```bash
-scripts/smoketest.sh -x -v '^disjoint_from_raw_parts$'
+cuda-oxide/scripts/smoketest.sh -x -v '^disjoint_from_raw_parts$'
 ```
 
 ## Expected output

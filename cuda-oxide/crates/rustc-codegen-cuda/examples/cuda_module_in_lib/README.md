@@ -64,7 +64,7 @@ On a machine without a CUDA driver, the archive-link check can run by itself:
 
 ```bash
 cargo oxide build cuda_module_in_lib
-./crates/rustc-codegen-cuda/examples/cuda_module_in_lib/target/release/cuda_module_in_lib --verify-bundles
+./cuda-oxide/crates/rustc-codegen-cuda/examples/cuda_module_in_lib/target/release/cuda_module_in_lib --verify-bundles
 ```
 
 ## Expected Output

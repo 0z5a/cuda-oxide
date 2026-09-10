@@ -390,7 +390,7 @@ constant_memory_simple::kernels::SCALE -> ConstantMemory<f32>, AS4
 The constant-memory verifier also checks `DW_AT_address_class 4` in the cubin.
 
 End-to-end behavior (breakpoint binds, backtrace, `info args`/`info locals`) is
-checked on real hardware by `scripts/debug-smoketest.sh`.
+checked on real hardware by `cuda-oxide/scripts/debug-smoketest.sh`.
 
 Coverage is still partial. Unsupported cases include bare slice arguments
 split into a `(ptr, len)` pair at the ABI boundary, repeated dereferences,

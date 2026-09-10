@@ -23,13 +23,13 @@ pointer), so extending the guess would have mistyped the call result.
 
 ## Fix
 
-`crates/mir-importer/src/translator/terminator/mod.rs` now types call
+`cuda-oxide/crates/mir-importer/src/translator/terminator/mod.rs` now types call
 results from the caller's destination place
 (`destination.ty(body.locals())`), which rustc has already monomorphized and
 normalized to the concrete type. The callee's `mir.func` return type is
 independently derived from the callee body's return place, normalized the
 same way, so caller and callee always agree. The name-matching `Output`
-guess in `crates/mir-importer/src/translator/types.rs` is removed entirely;
+guess in `cuda-oxide/crates/mir-importer/src/translator/types.rs` is removed entirely;
 projections that somehow still reach the type translator now fail loudly
 instead of being guessed.
 

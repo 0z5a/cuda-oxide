@@ -64,23 +64,23 @@ The fuzzing setup is split into four parts:
 
 | Piece                                  | Role                                           |
 | :--------------------------------------| :--------------------------------------------- |
-| `crates/fuzzer`                        | Shared trace API and vendored rustlantis       |
-| `crates/fuzzer/tools/mir_generator.py` | Seed-to-`generated_case.rs` adapter            |
-| `crates/fuzzer/tools/run_seed.py`      | Batch runner and artifact recorder             |
+| `cuda-oxide/crates/fuzzer`                        | Shared trace API and vendored rustlantis       |
+| `cuda-oxide/crates/fuzzer/tools/mir_generator.py` | Seed-to-`generated_case.rs` adapter            |
+| `cuda-oxide/crates/fuzzer/tools/run_seed.py`      | Batch runner and artifact recorder             |
 | `rustlantis-smoke`                     | Stable CPU/GPU execution harness               |
 
-`crates/fuzzer` is a normal workspace crate, but its library surface is
+`cuda-oxide/crates/fuzzer` is a normal workspace crate, but its library surface is
 `no_std`. Device code imports `trace_reset`, `trace_finish`, and the generic
 `dump_var` from there. The actual rustlantis source is vendored under
-`crates/fuzzer/rustlantis`; it is invoked as an external generator, not used as
+`cuda-oxide/crates/fuzzer/rustlantis`; it is invoked as an external generator, not used as
 a Rust library dependency.
 
 The `rustlantis-smoke` example lives under
-`crates/rustc-codegen-cuda/examples/`. It owns the host/GPU launch logic and a
+`cuda-oxide/crates/rustc-codegen-cuda/examples/`. It owns the host/GPU launch logic and a
 small hand-written sanity test, then includes one generated file:
 
 ```text
-crates/rustc-codegen-cuda/examples/rustlantis-smoke/src/generated_case.rs
+cuda-oxide/crates/rustc-codegen-cuda/examples/rustlantis-smoke/src/generated_case.rs
 ```
 
 The fuzzer tools rewrite that file for each seed. Everything else in the
@@ -130,13 +130,13 @@ longer merely "did the return value match?"
 Run one seed:
 
 ```bash
-python3 crates/fuzzer/tools/run_seed.py --seed 192
+python3 cuda-oxide/crates/fuzzer/tools/run_seed.py --seed 192
 ```
 
 Run a batch:
 
 ```bash
-python3 crates/fuzzer/tools/run_seed.py --start 0 --count 20 --keep-going
+python3 cuda-oxide/crates/fuzzer/tools/run_seed.py --start 0 --count 20 --keep-going
 ```
 
 Useful flags:
@@ -223,7 +223,7 @@ snack, before it can hash a six-element tuple.
 Per-seed logs live under:
 
 ```text
-crates/fuzzer/artifacts/
+cuda-oxide/crates/fuzzer/artifacts/
 ```
 
 Failure logs include:

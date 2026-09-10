@@ -16,7 +16,7 @@ Device code calls: std::sys::cmath::tan
 ```
 
 The fix adds the `std::sys::cmath::{sin,cos,tan}{,f}` arms to the dispatch in
-`crates/mir-importer/src/translator/terminator/intrinsics/float_math.rs`, so
+`cuda-oxide/crates/mir-importer/src/translator/terminator/intrinsics/float_math.rs`, so
 `.tan()` now lowers to the `__nv_tan{,f}` libdevice call like every other
 transcendental.
 

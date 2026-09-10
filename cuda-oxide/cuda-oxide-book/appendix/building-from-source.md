@@ -142,7 +142,7 @@ cargo build
 ```
 
 ```{note}
-The codegen backend (`crates/rustc-codegen-cuda/`) is intentionally **not** a
+The codegen backend (`cuda-oxide/crates/rustc-codegen-cuda/`) is intentionally **not** a
 workspace member because it requires special nightly features and a different
 build process. `cargo-oxide` handles building it transparently.
 ```
@@ -206,7 +206,7 @@ The documentation lives in `cuda-oxide-book/` and uses Sphinx with MyST
 Markdown. To build and serve locally:
 
 ```bash
-cd cuda-oxide-book
+cd cuda-oxide/cuda-oxide-book
 make setup      # creates venv, installs dependencies
 source .venv/bin/activate
 make livehtml   # starts dev server on http://localhost:8000
@@ -228,27 +228,29 @@ documented from cutile-rs.
 ## Workspace structure
 
 ```text
-cuda-oxide/
+repository/
 ├── Cargo.toml              # Workspace root
 ├── rust-toolchain.toml     # Pinned nightly + components
-├── crates/
-│   ├── cuda-device/          # Device intrinsics (#![no_std])
-│   ├── cuda-host/            # Host launch APIs
-│   ├── cuda-macros/          # Proc macros (#[kernel], #[device], gpu_printf!)
-│   │                         # (cuda-bindings, cuda-core, cuda-async come from
-│   │                         #  NVlabs/cutile-rs; SIMT API under their simt modules)
-│   ├── cargo-oxide/          # Cargo subcommand
-│   ├── rustc-codegen-cuda/   # Codegen backend (not a workspace member)
-│   ├── mir-importer/         # MIR → Pliron IR translation
-│   ├── mir-lower/            # `dialect-mir` → LLVM dialect lowering
-│   ├── dialect-mir/          # pliron dialect modelling Rust MIR
-│   ├── llvm-export/          # shim re-exporting pliron-llvm + textual .ll export
-│   ├── dialect-nvvm/         # NVVM intrinsics dialect
-│   ├── libnvvm-sys/          # dlopen bindings to libNVVM
-│   ├── nvjitlink-sys/        # dlopen bindings to nvJitLink
-│   ├── reserved-oxide-symbols/ # Shared naming contract
-│   └── fuzzer/               # Differential testing support
-└── cuda-oxide-book/        # This book (Sphinx + MyST)
+├── cutile-rs/              # Tile DSL (nested import)
+└── cuda-oxide/
+    ├── crates/
+    │   ├── cuda-device/          # Device intrinsics (#![no_std])
+    │   ├── cuda-host/            # Host launch APIs
+    │   ├── cuda-macros/          # Proc macros (#[kernel], #[device], gpu_printf!)
+    │   │                         # (cuda-bindings, cuda-core, cuda-async come from
+    │   │                         #  NVlabs/cutile-rs; SIMT API under their simt modules)
+    │   ├── cargo-oxide/          # Cargo subcommand
+    │   ├── rustc-codegen-cuda/   # Codegen backend (not a workspace member)
+    │   ├── mir-importer/         # MIR → Pliron IR translation
+    │   ├── mir-lower/            # `dialect-mir` → LLVM dialect lowering
+    │   ├── dialect-mir/          # pliron dialect modelling Rust MIR
+    │   ├── llvm-export/          # shim re-exporting pliron-llvm + textual .ll export
+    │   ├── dialect-nvvm/         # NVVM intrinsics dialect
+    │   ├── libnvvm-sys/          # dlopen bindings to libNVVM
+    │   ├── nvjitlink-sys/        # dlopen bindings to nvJitLink
+    │   ├── reserved-oxide-symbols/ # Shared naming contract
+    │   └── fuzzer/               # Differential testing support
+    └── cuda-oxide-book/        # This book (Sphinx + MyST)
 ```
 
 ## Troubleshooting

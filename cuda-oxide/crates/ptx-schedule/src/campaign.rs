@@ -54,6 +54,7 @@ pub enum CampaignError {
 #[derive(Clone, Debug)]
 pub struct CampaignOptions {
     pub workspace_root: PathBuf,
+    pub simt_root: PathBuf,
     pub oxide_binary: PathBuf,
     pub example: String,
     /// Half-open seed interval: `0..100` runs seeds 0 through 99.
@@ -235,7 +236,7 @@ pub fn run_campaign(options: &CampaignOptions) -> Result<CampaignSummary, Campai
     }
 
     let example_dir = options
-        .workspace_root
+        .simt_root
         .join("crates/rustc-codegen-cuda/examples")
         .join(&options.example);
     if !example_dir.join("Cargo.toml").is_file() {
@@ -261,7 +262,7 @@ pub fn run_campaign(options: &CampaignOptions) -> Result<CampaignSummary, Campai
     let static_sites = static_site_report(&analysis);
     let output_dir = options.output_dir.clone().unwrap_or_else(|| {
         options
-            .workspace_root
+            .simt_root
             .join("crates/fuzzer/artifacts/schedule")
             .join(&options.example)
     });

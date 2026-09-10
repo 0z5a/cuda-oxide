@@ -5,8 +5,8 @@
 # crate, that hardcodes a reserved *symbol* prefix as a string literal.
 #
 # The single source of truth for these prefixes is
-# `crates/reserved-oxide-symbols/`; everything else must route through that
-# crate's constants, builders, and predicates.
+# `cuda-oxide/crates/reserved-oxide-symbols/`; everything else must route
+# through that crate's constants, builders, and predicates.
 #
 # The alternation below covers all ten symbol constants that crate exports:
 # `kernel` covers LEGACY_KERNEL_PREFIX and KERNEL_SCOPE_LOCAL; `device` covers
@@ -47,6 +47,8 @@ set -euo pipefail
 export LC_ALL=C
 
 cd "$(dirname "$0")/.."
+GIT_ROOT="$(git rev-parse --show-toplevel)"
+cd "${GIT_ROOT}"
 
 if ! command -v grep >/dev/null 2>&1; then
     echo "error: grep is required to verify reserved-prefix usage" >&2
@@ -70,10 +72,20 @@ if ! grep -rEn --include='*.rs' "${pattern}" "${canary}/crates" >/dev/null; then
     exit 1
 fi
 
+# Host crates are crates.io / cutile-rs, not in-tree Oxide members. Search the
+# nested SIMT tree only — the same scope as `crates/` on a flat Oxide checkout.
+SEARCH_ROOTS=(cuda-oxide/crates)
+for root in "${SEARCH_ROOTS[@]}"; do
+    if [ ! -d "${root}" ]; then
+        echo "error: reserved-prefix search root '${root}' does not exist" >&2
+        exit 1
+    fi
+done
+
 # grep exits 0 with matches, 1 with none, and >=2 on error.  Only 1 means
 # clean; anything higher must fail rather than be mistaken for an empty result.
 set +e
-matches="$(grep -rEn --include='*.rs' "${pattern}" crates --exclude-dir=target)"
+matches="$(grep -rEn --include='*.rs' "${pattern}" "${SEARCH_ROOTS[@]}" --exclude-dir=target)"
 status=$?
 set -e
 if [ "${status}" -gt 1 ]; then
@@ -82,7 +94,7 @@ if [ "${status}" -gt 1 ]; then
 fi
 
 violations="$(printf '%s\n' "${matches}" |
-    grep -v '^crates/reserved-oxide-symbols/' |
+    grep -v '^cuda-oxide/crates/reserved-oxide-symbols/' |
     grep -vE ':[0-9]+:[[:space:]]*//' || true)"
 
 if [ -n "${violations}" ]; then
@@ -90,7 +102,7 @@ if [ -n "${violations}" ]; then
     printf '%s\n' "${violations}" | sed 's/^/  /' >&2
     echo >&2
     echo "Use the constants, builders, and predicates from" >&2
-    echo "crates/reserved-oxide-symbols/ instead. See its README for the" >&2
+    echo "cuda-oxide/crates/reserved-oxide-symbols/ instead. See its README for the" >&2
     echo "layered API." >&2
     exit 1
 fi

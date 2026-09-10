@@ -45,7 +45,7 @@ variants alone. For this four-variant `#[repr(u32)]` enum, that selected an
 
 Pointer arithmetic over `*const Tag` then used the lowered enum element size,
 so `base.add(1)` advanced by 1 byte instead of 4 bytes. The fix in
-`crates/mir-importer/src/translator/types.rs` sources the discriminant type
+`cuda-oxide/crates/mir-importer/src/translator/types.rs` sources the discriminant type
 from **rustc's layout** (`rust_ty.layout()`): for `TagEncoding::Direct` enums
 the tag scalar's width and signedness are used directly. Reading the layout
 (rather than the `repr` attribute or the variant count) covers every tag

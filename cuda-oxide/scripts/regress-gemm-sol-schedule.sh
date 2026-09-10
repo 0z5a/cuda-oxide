@@ -159,7 +159,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/.." && pwd)"
 cd "${repo_root}"
 
-if [[ ! -f "Cargo.toml" ]] || [[ ! -d "crates/rustc-codegen-cuda/examples/gemm_sol" ]]; then
+if [[ ! -f "${repo_root}/../Cargo.toml" ]] || [[ ! -d "crates/rustc-codegen-cuda/examples/gemm_sol" ]]; then
     echo "error: must be run from inside the cuda-oxide repo (got ${PWD})" >&2
     exit 2
 fi

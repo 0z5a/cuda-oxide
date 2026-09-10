@@ -137,7 +137,7 @@ walked the remaining projections in an inner loop that only handled further
 unconditionally returned the partial field address, **silently discarding**
 any tail projections, including a runtime `Index`.
 
-That arm lives in `crates/mir-importer/src/translator/rvalue/expr.rs`, and the
+That arm lives in `cuda-oxide/crates/mir-importer/src/translator/rvalue/expr.rs`, and the
 address walk it delegates to in `…/rvalue/place_addr.rs`.
 
 The fix delegates the tail walk to the existing

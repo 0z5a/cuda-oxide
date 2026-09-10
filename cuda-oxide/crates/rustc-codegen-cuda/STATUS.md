@@ -8,8 +8,8 @@ Examples named `error*` fall into two kinds:
   Kept as an expected-failure regression test until it is implemented.
 
 When adding a new `error*` example, update this table and the
-`ERROR_EXAMPLES` array in `scripts/smoketest.sh` in the same commit.
-Run `scripts/check-error-example-status.sh` to verify both are in sync.
+`ERROR_EXAMPLES` array in `cuda-oxide/scripts/smoketest.sh` in the same commit.
+Run `cuda-oxide/scripts/check-error-example-status.sh` to verify both are in sync.
 
 | Example                                | Kind                | Fails at                             |
 | :------------------------------------- | :------------------ | :----------------------------------- |

@@ -71,7 +71,7 @@ Build and inspect the generated PTX without a GPU:
 ```bash
 cargo oxide build policy_config
 cargo run --release \
-  --manifest-path crates/rustc-codegen-cuda/examples/policy_config/Cargo.toml \
+  --manifest-path cuda-oxide/crates/rustc-codegen-cuda/examples/policy_config/Cargo.toml \
   -- --verify-ptx
 ```
 

@@ -19,6 +19,7 @@
 set -euo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
+GIT_ROOT="$(git rev-parse --show-toplevel)"
 
 in_tree="$(sed -n -E 's/^version = "([^"]+)"/\1/p' crates/oxide-artifacts/Cargo.toml | head -1)"
 [ -n "${in_tree}" ] || { echo "error: crates/oxide-artifacts/Cargo.toml has no version" >&2; exit 1; }
@@ -36,7 +37,7 @@ req_of() {  # req_of FILE -> the version requirement on the oxide-artifacts line
         echo "missing"
     fi
 }
-for manifest in Cargo.toml crates/rustc-codegen-cuda/Cargo.toml; do
+for manifest in "${GIT_ROOT}/Cargo.toml" crates/rustc-codegen-cuda/Cargo.toml; do
     req="$(req_of "${manifest}")"
     if [ "${req}" != "${in_tree}" ]; then
         echo "error: ${manifest}: oxide-artifacts requirement is '${req}', in-tree version is ${in_tree}" >&2; status=1
@@ -54,7 +55,7 @@ while IFS= read -r lock; do
     if ! grep -A3 '^name = "oxide-artifacts"$' "${lock}" | grep -q 'source = "registry+'; then
         echo "error: ${lock}: oxide-artifacts is not consumed from crates.io" >&2; status=1
     fi
-done < <(git ls-files 'Cargo.lock' '*/Cargo.lock' '**/Cargo.lock')
+done < <(git -C "${GIT_ROOT}" ls-files 'Cargo.lock' '*/Cargo.lock' '**/Cargo.lock' | while read -r lock; do echo "${GIT_ROOT}/${lock}"; done)
 
 [ "${status}" -eq 0 ] && echo "OK: oxide-artifacts is ${in_tree} in the tree, in both manifests, and in every lock (from crates.io)."
 exit "${status}"

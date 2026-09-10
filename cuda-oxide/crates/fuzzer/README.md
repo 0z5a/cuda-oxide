@@ -1,6 +1,6 @@
 # cuda-oxide fuzzer support
 
-`crates/fuzzer` contains the reusable pieces for rustlantis-based differential
+`cuda-oxide/crates/fuzzer` contains the reusable pieces for rustlantis-based differential
 codegen testing:
 
 - `src/trace.rs`: the `no_std` trace API used by both CPU and GPU runs.
@@ -9,7 +9,7 @@ codegen testing:
 - `tools/run_seed.py`: generates a seed, injects it into `rustlantis-smoke`, and runs it.
 
 The execution harness is still the example at
-`crates/rustc-codegen-cuda/examples/rustlantis-smoke`. The fuzzer tools rewrite
+`cuda-oxide/crates/rustc-codegen-cuda/examples/rustlantis-smoke`. The fuzzer tools rewrite
 only `src/generated_case.rs`; `src/main.rs` remains the stable CPU/GPU harness.
 
 ## Schedule fuzzing of existing examples
@@ -31,7 +31,7 @@ and `--compare-output`. A finding is rerun up to `--confirm-runs` times;
 `--fail-on-finding` makes the command suitable for CI. Mutated PTX, site
 decisions, stdout/stderr, confirmation logs, `replay.sh`, `sites.json`, and
 `summary.json` are written under
-`crates/fuzzer/artifacts/schedule/<example>/`. A timeout is rechecked with
+`cuda-oxide/crates/fuzzer/artifacts/schedule/<example>/`. A timeout is rechecked with
 pristine PTX so a wedged device is distinguished from a variant hang.
 
 The campaign reports schedule-sensitive outcomes rather than claiming to
@@ -56,13 +56,13 @@ working directory.
 Run one seed:
 
 ```bash
-python3 crates/fuzzer/tools/run_seed.py --seed 33
+python3 cuda-oxide/crates/fuzzer/tools/run_seed.py --seed 33
 ```
 
 Run a range:
 
 ```bash
-python3 crates/fuzzer/tools/run_seed.py --start 0 --count 20 --keep-going --keep-logs
+python3 cuda-oxide/crates/fuzzer/tools/run_seed.py --start 0 --count 20 --keep-going --keep-logs
 ```
 
 The seed controls rustlantis' pseudo-random generator. Same seed plus same
@@ -116,7 +116,7 @@ hash, so `--start 1436 --count 2 --keep-going` currently reports:
 
 ```text
 results:
-  seed 1436: UNSUPPORTED [adapter] unsupported return type for return-value tracing: *const i8 (crates/fuzzer/artifacts/seed-1436-unsupported.log)
+  seed 1436: UNSUPPORTED [adapter] unsupported return type for return-value tracing: *const i8 (cuda-oxide/crates/fuzzer/artifacts/seed-1436-unsupported.log)
   seed 1437: PASS [run] CPU/GPU traces matched
 summary: PASS=1, UNSUPPORTED=1
 ```
@@ -185,13 +185,13 @@ results in ULPs before treating the difference as a miscompile.
 
 ## Artifacts
 
-`run_seed.py` writes artifacts under `crates/fuzzer/artifacts/`, which is
+`run_seed.py` writes artifacts under `cuda-oxide/crates/fuzzer/artifacts/`, which is
 ignored by git.
 
 Per-seed logs:
 
 ```text
-crates/fuzzer/artifacts/seed-<N>-<status>.log
+cuda-oxide/crates/fuzzer/artifacts/seed-<N>-<status>.log
 ```
 
 Failure logs include:
@@ -208,10 +208,10 @@ Failure logs include:
 The run summary is also written as:
 
 ```text
-crates/fuzzer/artifacts/summary.jsonl
+cuda-oxide/crates/fuzzer/artifacts/summary.jsonl
 ```
 
-`run_seed.py` clears `crates/fuzzer/artifacts/` at the start of every
+`run_seed.py` clears `cuda-oxide/crates/fuzzer/artifacts/` at the start of every
 invocation, so the logs and `summary.jsonl` always describe only the latest run.
 
 The terminal also prints a full per-seed summary; entries that wrote a log
@@ -222,7 +222,7 @@ prints:
 
 ```text
 results:
-  seed 1436: UNSUPPORTED [adapter] unsupported return type for return-value tracing: *const i8 (crates/fuzzer/artifacts/seed-1436-unsupported.log)
+  seed 1436: UNSUPPORTED [adapter] unsupported return type for return-value tracing: *const i8 (cuda-oxide/crates/fuzzer/artifacts/seed-1436-unsupported.log)
   seed 1437: PASS [run] CPU/GPU traces matched
 summary: PASS=1, UNSUPPORTED=1
 ```

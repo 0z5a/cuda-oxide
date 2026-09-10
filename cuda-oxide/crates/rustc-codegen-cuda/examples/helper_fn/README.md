@@ -35,7 +35,7 @@ pub fn vecadd_with_helper(a: &[f32], b: &[f32], c: DisjointSlice<f32>) {
 }
 ```
 
-Note: `#[device]` generates a `cuda_oxide_device_<hash>_` prefixed internal symbol (the prefix is owned by `crates/reserved-oxide-symbols/`), but callers use the original name. The LLVM export layer strips the prefix in the final PTX.
+Note: `#[device]` generates a `cuda_oxide_device_<hash>_` prefixed internal symbol (the prefix is owned by `cuda-oxide/crates/reserved-oxide-symbols/`), but callers use the original name. The LLVM export layer strips the prefix in the final PTX.
 
 ### Function Inlining
 

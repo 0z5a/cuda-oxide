@@ -97,7 +97,7 @@ the m64n64 partial wait.
 To run the repository smoketest:
 
 ```bash
-scripts/smoketest.sh -x -v '^wgmma_mma_bf16$'
+cuda-oxide/scripts/smoketest.sh -x -v '^wgmma_mma_bf16$'
 ```
 
 ## Expected smoketest marker

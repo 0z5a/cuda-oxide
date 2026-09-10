@@ -29,7 +29,7 @@
 #
 # Three kinds of files are deliberately not held to the standard header:
 #
-#   * crates/fuzzer/rustlantis/** is embedded third-party code (attributed in
+#   * cuda-oxide/crates/fuzzer/rustlantis/** is embedded third-party code (attributed in
 #     THIRD_PARTY_NOTICES). Its files keep their upstream form; adding an
 #     NVIDIA copyright line to code we do not own would be wrong, so the whole
 #     subtree is out of scope.
@@ -52,6 +52,8 @@ set -euo pipefail
 export LC_ALL=C
 
 cd "$(dirname "$0")/.."
+GIT_ROOT="$(git rev-parse --show-toplevel)"
+cd "${GIT_ROOT}"
 
 copyright_re='SPDX-FileCopyrightText: Copyright \(c\) [0-9]{4}( ?- ?[0-9]{4})? NVIDIA CORPORATION & AFFILIATES\. All rights reserved\.'
 license_re='SPDX-License-Identifier: Apache-2\.0'
@@ -60,8 +62,8 @@ HEADER_WINDOW=15
 # CUTLASS-derived files accepted by the OSRB with their upstream BSD-3-Clause
 # terms. Path plus the identifier each must still carry.
 BSD_EXEMPT_FILES=(
-    crates/rustc-codegen-cuda/examples/gemm_sol/bench/tutorial_gemm_utils.py
-    crates/rustc-codegen-cuda/examples/gemm_sol_final/bench/tutorial_gemm_utils.py
+    cuda-oxide/crates/rustc-codegen-cuda/examples/gemm_sol/bench/tutorial_gemm_utils.py
+    cuda-oxide/crates/rustc-codegen-cuda/examples/gemm_sol_final/bench/tutorial_gemm_utils.py
 )
 
 # `head | grep -q` under pipefail can report a match as failure when grep
@@ -116,7 +118,7 @@ while IFS= read -r f; do
 done < <(git ls-files -- '*.rs' '*.sh' '*.py' '*.cu' '*.c' '*.h' '*.ll' \
     '*.js' '*.css' '*.html' '*.nix' |
     grep -v '^cutile-rs/' |
-    grep -v '^crates/fuzzer/rustlantis/' |
+    grep -v '^cuda-oxide/crates/fuzzer/rustlantis/' |
     grep -vxF -f <(printf '%s\n' "${BSD_EXEMPT_FILES[@]}"))
 
 if [ -n "${violations}" ]; then

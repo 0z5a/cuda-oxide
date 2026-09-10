@@ -21,8 +21,9 @@
 # Scope, deliberately narrow, because this is the kind of guard that goes soft
 # the moment it starts inferring:
 #
-#   * A path is only checked when it is anchored at a repo root -- crates/,
-#     cuda-oxide-book/, scripts/ -- and carries a file extension. That
+#   * A path is only checked when it is anchored at a repo root --
+#     cuda-oxide/crates/, cuda-oxide/cuda-oxide-book/, cuda-oxide/scripts/ --
+#     and carries a file extension. That
 #     is the form a new reference normally takes, and the only one that is
 #     unambiguous on its own. Each root is verified to be a real tracked
 #     directory before the sweep, so a renamed root fails here rather than
@@ -46,7 +47,7 @@
 #
 # Two things stay out of scope on purpose:
 #
-#   * `intrinsics/` is not a root. It is both a real top-level directory and a
+#   * `intrinsics/` is not a root. It is both a directory under cuda-oxide/ and a
 #     common crate-relative fragment: examples/atomics/README.md names
 #     `intrinsics/atomic.rs` in a pipeline diagram, meaning
 #     `mir-importer/src/translator/terminator/intrinsics/atomic.rs`, which is
@@ -58,13 +59,14 @@
 #     any other mention of it is guesswork, and a guard that guesses is worse
 #     than one that is narrow.
 #   * Prose under `cutile-rs/` is written for that tree's root. A `scripts/`
-#     reference there means `cutile-rs/scripts/`, not this repository's
-#     `scripts/` root. Only that prefix is rewritten, and only for files
-#     already under `cutile-rs/`. Oxide prose that names `scripts/run_all.sh`
-#     still fails, because that file is not at the Oxide root.
+#     reference there means `cutile-rs/scripts/`. Prose under `cuda-oxide/` is
+#     written for that tree: `scripts/`, `crates/`, and `cuda-oxide-book/`
+#     there mean the same paths with a `cuda-oxide/` prefix. Only those
+#     prefixes are rewritten, and only for files already in that tree. A
+#     `scripts/run_all.sh` reference outside both trees still fails.
 set -euo pipefail
 export LC_ALL=C
-cd "$(dirname "$0")/.."
+cd "$(git rev-parse --show-toplevel)"
 
 if ! command -v python3 >/dev/null 2>&1; then
     echo "error: python3 is required to check source references" >&2
@@ -78,10 +80,13 @@ import subprocess
 import sys
 import tempfile
 
-ROOTS = ("crates", "cuda-oxide-book", "scripts")
+ROOTS = ("cuda-oxide/crates", "cuda-oxide/cuda-oxide-book", "cuda-oxide/scripts")
+# Short anchors are how prose inside a product tree names that tree.
+# checked_references adds the product prefix; these are not tracked roots.
+PATH_ROOTS = ROOTS + ("crates", "cuda-oxide-book", "scripts")
 EXTS = ("rs", "md", "sh", "toml", "jsonl", "json", "ll", "py", "yaml", "yml")
 # run_seed.py writes and clears this output; the fuzzer README names it.
-GENERATED_OUTPUT_PATHS = {"crates/fuzzer/artifacts/summary.jsonl"}
+GENERATED_OUTPUT_PATHS = {"cuda-oxide/crates/fuzzer/artifacts/summary.jsonl"}
 
 # Read complete tokens first, then classify them. Whitespace and ordinary
 # Markdown/prose wrappers delimit tokens. Scheme-prefixed and network-path
@@ -96,7 +101,7 @@ TOKEN = re.compile(
     r'''|[^\s`'"<>()\[\],;|]+'''
 )
 PATH = re.compile(
-    r"(?:" + "|".join(map(re.escape, ROOTS)) + r")/[A-Za-z0-9._/-]+\."
+    r"(?:" + "|".join(map(re.escape, PATH_ROOTS)) + r")/[A-Za-z0-9._/-]+\."
     r"(?:" + "|".join(map(re.escape, EXTS)) + r")"
 )
 DOC_LINE = re.compile(r"^\s*(?:///(?!/)|//!)")
@@ -168,10 +173,16 @@ def references(filename, text):
 
 
 def checked_references(filename, text):
-    # See the cutile-rs note in the header. Rewrite only this one anchor.
+    # See the header. Rewrite only the anchors that are relative to a product tree.
     for lineno, path in references(filename, text):
         if filename.startswith("cutile-rs/") and path.startswith("scripts/"):
             path = "cutile-rs/" + path
+        elif filename.startswith("cuda-oxide/") and (
+            path.startswith("scripts/")
+            or path.startswith("crates/")
+            or path.startswith("cuda-oxide-book/")
+        ):
+            path = "cuda-oxide/" + path
         yield lineno, path
 
 
@@ -204,15 +215,15 @@ for root in ROOTS:
 live = next((path for path in sorted(tracked) if PATH.fullmatch(path)), None)
 if live is None:
     sys.exit("error: source-reference guard: no tracked path matches the declared roots/extensions")
-with tempfile.NamedTemporaryFile(prefix="zz-source-reference-", suffix=".rs", dir="crates") as canary:
+with tempfile.NamedTemporaryFile(prefix="zz-source-reference-", suffix=".rs", dir="cuda-oxide/crates") as canary:
     untracked = pathlib.Path(canary.name).relative_to(pathlib.Path.cwd()).as_posix()
-    missing = "crates/no-such-source-reference-crate/src/lib.rs"
+    missing = "cuda-oxide/crates/no-such-source-reference-crate/src/lib.rs"
     # Synthetic policy inputs exercise the same decision functions even when
     # the repository no longer needs any generated-output declarations.
-    output = "crates/source-reference-canary/generated.jsonl"
+    output = "cuda-oxide/crates/source-reference-canary/generated.jsonl"
     generated = {output}
     controls = [
-        ("case.md", "crates/cuda-device/src/no-such-source-reference-file.rs", 1),
+        ("case.md", "cuda-oxide/crates/cuda-device/src/no-such-source-reference-file.rs", 1),
         ("case.md", missing, 1),
         ("case.md", untracked, 1),
         ("case.md", f"`{live}`, [{live}]({live}#L1); **{live}**; {live}:1-2.", 0),
@@ -233,7 +244,7 @@ with tempfile.NamedTemporaryFile(prefix="zz-source-reference-", suffix=".rs", di
         ("case.md", f"[source]:{missing}\n [source]: {missing}\n[source]:<{missing}#L1>", 3),
         ("case.md", f"[source]:https://example.invalid/{missing}\n[source]:custom:{missing}", 0),
         ("case.md", f"TODO:{missing}\nhttps://example.invalid/[source]:{missing}", 0),
-        ("case.md", "crates/../scripts/no-such-source-reference-file.sh", 1),
+        ("case.md", "cuda-oxide/crates/../scripts/no-such-source-reference-file.sh", 1),
         ("case.rs", f"/// {missing}\n//! {missing}", 2),
         ("case.rs", f"///{missing}\n//!{missing}", 2),
         ("case.rs", f'// {missing}\n//// {missing}\nconst P: &str = "{missing}";', 0),
@@ -242,7 +253,7 @@ with tempfile.NamedTemporaryFile(prefix="zz-source-reference-", suffix=".rs", di
         actual = list(broken_references(references(filename, text), tracked, generated))
         if len(actual) != expected:
             sys.exit(f"error: source-reference guard self-test failed for {text!r}: {actual}")
-    traversal = "crates/../scripts/no-such-source-reference-file.sh"
+    traversal = "cuda-oxide/crates/../scripts/no-such-source-reference-file.sh"
     if list(broken_references(references("case.md", traversal), tracked, generated)) != [
         (1, traversal, "contains an unsupported traversal segment")
     ]:
@@ -273,6 +284,15 @@ with tempfile.NamedTemporaryFile(prefix="zz-source-reference-", suffix=".rs", di
         (1, "scripts/run_all.sh", "is not tracked in this repository")
     ]:
         sys.exit("error: source-reference guard self-test accepted an Oxide-root scripts/run_all.sh reference")
+    oxide_script = "cuda-oxide/scripts/smoketest.sh"
+    if oxide_script not in tracked:
+        sys.exit(f"error: source-reference guard self-test expected {oxide_script} to be tracked")
+    if list(broken_references(checked_references("cuda-oxide/README.md", "`scripts/smoketest.sh`"), tracked, generated)):
+        sys.exit("error: source-reference guard self-test rejected a cuda-oxide scripts reference")
+    if list(broken_references(checked_references("cuda-oxide/README.md", "`scripts/run_all.sh`"), tracked, generated)) != [
+        (1, "cuda-oxide/scripts/run_all.sh", "is not tracked in this repository")
+    ]:
+        sys.exit("error: source-reference guard self-test accepted a cutile script as a cuda-oxide script")
 
 checked = 0
 broken = []

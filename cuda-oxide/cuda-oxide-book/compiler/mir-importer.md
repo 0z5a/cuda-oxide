@@ -15,7 +15,7 @@ But translation is only half the job. `mir-importer` also orchestrates the
 *entire* compilation pipeline: translate, verify, optimize `dialect-mir`, lower,
 export, and generate PTX. It is both the translator and the stage manager.
 
-The crate lives in `crates/mir-importer` and is split into two parts:
+The crate lives in `cuda-oxide/crates/mir-importer` and is split into two parts:
 
 - **`translator/`** -- the MIR-to-pliron translation logic (the interesting part).
 - **`pipeline.rs`** -- the orchestration that chains every stage together (the
@@ -295,13 +295,13 @@ match name {
 
 Most arms are not written out by hand. Anything described by
 `intrinsics/catalog.json` has its arm generated into a per-family module under
-`crates/mir-importer/src/translator/terminator/intrinsics/generated/`.
+`cuda-oxide/crates/mir-importer/src/translator/terminator/intrinsics/generated/`.
 Both arms above are of that kind, and so are the warp shuffles: the matched
 strings are the masked `_sync` forms (`shuffle_xor_sync`,
 `shuffle_xor_f32_sync`, `shuffle_xor_u64_sync`, and the
 `shuffle_up_*`/`shuffle_down_*` families). The bare `warp::shuffle_xor` is
 never a match string. It is an `#[inline(always)]` wrapper in
-`crates/cuda-device/src/warp.rs` that supplies the full-warp mask
+`cuda-oxide/crates/cuda-device/src/warp.rs` that supplies the full-warp mask
 (`u32::MAX`) and calls `shuffle_xor_sync`, so the dispatcher only ever
 intercepts the `_sync` call. The hand-written arms in `terminator/mod.rs`
 and the `intrinsics/` modules beside the generated file hold the cases the

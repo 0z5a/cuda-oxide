@@ -46,7 +46,7 @@ against single-threaded `hashbrown::HashMap` insert and rayon-parallel
 cargo oxide run hashmap_v2
 
 # Performance bench vs CPU `hashbrown::HashMap`:
-./crates/rustc-codegen-cuda/examples/hashmap_v2/run-bench.sh
+./cuda-oxide/crates/rustc-codegen-cuda/examples/hashmap_v2/run-bench.sh
 # (or directly: cargo oxide run hashmap_v2 --bin bench)
 ```
 

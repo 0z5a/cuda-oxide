@@ -297,10 +297,10 @@ gets the same compiler, the same MIR shapes, and the same bridge behavior.
 When updating the pin, the process is:
 
 1. Bump the nightly date in `rust-toolchain.toml`, and in the copy at
-   `crates/rustc-codegen-cuda/rust-toolchain.toml` -- that crate has its own
+   `cuda-oxide/crates/rustc-codegen-cuda/rust-toolchain.toml` -- that crate has its own
    `[workspace]` for the `rustc_private` dylibs, and its header requires an
    exact match with the parent, because a `rustc_public` build against a
-   different nightly fails to load. `scripts/check-toolchain-parity.sh`
+   different nightly fails to load. `cuda-oxide/scripts/check-toolchain-parity.sh`
    checks every copy: both real files, the scaffold `cargo oxide new`
    writes, the devcontainer, and the blocks and dated commands quoted in
    this book and the READMEs -- so run it to find the stragglers.

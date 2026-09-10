@@ -805,7 +805,7 @@ pub fn cooperative_launch(attr: TokenStream, item: TokenStream) -> TokenStream {
 /// 1. Adds `#[no_mangle]` to preserve the function name in the binary
 /// 2. Renames the function into the reserved `cuda_oxide_device_<hash>_` namespace
 ///    for detection by the codegen backend (the prefix lives in
-///    `crates/reserved-oxide-symbols/`)
+///    `cuda-oxide/crates/reserved-oxide-symbols/`)
 /// 3. Marks the function for extraction by the `rustc-codegen-cuda` backend
 ///
 /// Device functions can:

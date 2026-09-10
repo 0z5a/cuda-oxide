@@ -33,7 +33,7 @@ cargo oxide run partial_warp_reduce
 To run the repository smoketest:
 
 ```bash
-scripts/smoketest.sh -x -v '^partial_warp_reduce$'
+cuda-oxide/scripts/smoketest.sh -x -v '^partial_warp_reduce$'
 ```
 
 ## Expected output

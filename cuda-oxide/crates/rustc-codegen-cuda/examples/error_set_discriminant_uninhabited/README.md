@@ -26,5 +26,5 @@ The build must fail with:
 SetDiscriminant cannot select uninhabited variant 1
 ```
 
-`scripts/smoketest.sh` classifies this as a diagnostics fixture: rejection is
+`cuda-oxide/scripts/smoketest.sh` classifies this as a diagnostics fixture: rejection is
 the correct behavior, not a missing supported operation.

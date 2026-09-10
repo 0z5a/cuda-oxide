@@ -26,8 +26,9 @@
 set -euo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
+GIT_ROOT="$(git rev-parse --show-toplevel)"
 
-ROOT=Cargo.toml
+ROOT="${GIT_ROOT}/Cargo.toml"
 SCAFFOLD=crates/cargo-oxide/src/commands/scaffold.rs
 CRATES='cuda-(bindings|core|async)'
 
@@ -84,7 +85,11 @@ while IFS= read -r manifest; do
             fi
         done < <(grep -E "^([A-Za-z0-9_-]+[[:space:]]*=[[:space:]]*\{[^}]*package[[:space:]]*=[[:space:]]*\"${crate}\"|${crate}[[:space:]]*=)" "${manifest}" || true)
     done
-done < <(git ls-files 'crates/rustc-codegen-cuda/examples/*/Cargo.toml' 'crates/rustc-codegen-cuda/examples/*/*/Cargo.toml' 'crates/rustc-codegen-cuda/examples/*/*/*/Cargo.toml')
+done < <(git -C "${GIT_ROOT}" ls-files \
+    'cuda-oxide/crates/rustc-codegen-cuda/examples/*/Cargo.toml' \
+    'cuda-oxide/crates/rustc-codegen-cuda/examples/*/*/Cargo.toml' \
+    'cuda-oxide/crates/rustc-codegen-cuda/examples/*/*/*/Cargo.toml' \
+    | while read -r manifest; do echo "${GIT_ROOT}/${manifest}"; done)
 
 # 2. The scaffold constant.
 scaffold_version="$(sed -n -E 's/^pub\(super\) const SHARED_HOST_CRATES_VERSION: &str = "([^"]+)";/\1/p' "${SCAFFOLD}")"

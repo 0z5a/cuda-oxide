@@ -70,7 +70,7 @@ SUCCESS: 18/18 tests passed — all device functions compiled to PTX!
 
 1. The `#[device]` macro renames functions with the reserved
    `cuda_oxide_device_<hash>_` prefix (owned by
-   `crates/reserved-oxide-symbols/`) and generates an `#[inline(always)]`
+   `cuda-oxide/crates/reserved-oxide-symbols/`) and generates an `#[inline(always)]`
    wrapper with the original name.
 2. The collector (`rustc-codegen-cuda/src/collector.rs`) detects standalone
    `#[device]` functions as compilation roots when no `#[kernel]` is present

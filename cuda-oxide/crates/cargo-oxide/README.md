@@ -409,9 +409,9 @@ When `cargo oxide` needs the `librustc_codegen_cuda.so` backend, it searches in 
 
 1. **`CUDA_OXIDE_BACKEND` env var**: explicit path override
 2. **Project config**: `.cargo/cuda-oxide.toml`
-3. **Local repo**: detects `crates/rustc-codegen-cuda` relative to workspace root, builds from source
+3. **Local repo**: detects `cuda-oxide/crates/rustc-codegen-cuda` (or the historical flat `crates/rustc-codegen-cuda`) relative to workspace root, builds from source
 4. **Cached `.so`**: `~/.cargo/cuda-oxide/librustc_codegen_cuda.so`, when it was built from the commit the project's cuda-oxide dependency resolves to
-5. **Build from the dependency**: builds `crates/rustc-codegen-cuda` out of the checkout Cargo already made for the project's `cuda-device` / `cuda-host` dependency, and caches it
+5. **Build from the dependency**: builds the codegen crate out of the checkout Cargo already made for the project's `cuda-device` / `cuda-host` dependency, and caches it
 
 Outside the repository the backend follows the project's `Cargo.lock`:
 
@@ -475,7 +475,7 @@ disable its correctness-critical codegen options.
 ## Architecture
 
 ```text
-crates/cargo-oxide/
+cuda-oxide/crates/cargo-oxide/
 ├── Cargo.toml
 └── src/
     ├── main.rs       # CLI definitions (clap) + dispatch

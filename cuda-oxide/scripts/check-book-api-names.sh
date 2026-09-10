@@ -54,7 +54,8 @@ cd "$(dirname "$0")/.."
 
 BOOK=cuda-oxide-book
 DEVICE=crates/cuda-device/src
-CRATES=crates
+# Host crates live in the nested cutile-rs import; SIMT crates live here.
+CRATE_ROOTS=(../cutile-rs/cuda-core ../cutile-rs/cuda-bindings ../cutile-rs/cuda-async crates)
 
 if ! command -v python3 >/dev/null 2>&1; then
     echo "error: python3 is required to verify the docs' API names" >&2
@@ -64,15 +65,17 @@ fi
 
 test -d "${BOOK}"
 test -d "${DEVICE}"
-test -d "${CRATES}"
+for root in "${CRATE_ROOTS[@]}"; do
+    test -d "${root}"
+done
 
-python3 - "${BOOK}" "${DEVICE}" "${CRATES}" <<'PY'
+python3 - "${BOOK}" "${DEVICE}" "${CRATE_ROOTS[@]}" <<'PY'
 import glob
 import os
 import re
 import sys
 
-book_root, device_root, crates_root = sys.argv[1], sys.argv[2], sys.argv[3]
+book_root, device_root, *crates_roots = sys.argv[1:]
 
 RUST_BLOCK = re.compile(r"```rust[^\n]*\n(.*?)```", re.S)
 # `mod::name(` inside a code block: a call, so the name must exist.
@@ -129,11 +132,15 @@ if len(pages) < 20:
 # keep their upstream form and document another project's API.
 readmes = sorted(
     path
+    for crates_root in crates_roots
     for path in glob.glob(os.path.join(crates_root, "**", "README.md"), recursive=True)
     if "rustlantis" not in path.split(os.sep)
 )
 if len(readmes) < 50:
-    sys.exit(f"parse self-test failed: found {len(readmes)} READMEs under {crates_root}")
+    sys.exit(
+        f"parse self-test failed: found {len(readmes)} READMEs under "
+        + ", ".join(crates_roots)
+    )
 pages += readmes
 
 calls = {}

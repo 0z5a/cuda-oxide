@@ -56,10 +56,10 @@ export LC_ALL=C
 
 cd "$(dirname "$0")/.."
 
-ROOT_PIN=rust-toolchain.toml
+ROOT_PIN=../rust-toolchain.toml
 NESTED_PIN=crates/rustc-codegen-cuda/rust-toolchain.toml
 SCAFFOLD=crates/cargo-oxide/src/commands/scaffold.rs
-DEVCONTAINER=.devcontainer/devcontainer.json
+DEVCONTAINER=../.devcontainer/devcontainer.json
 
 if ! command -v python3 >/dev/null 2>&1; then
     echo "error: python3 is required to verify the toolchain pin" >&2
@@ -81,14 +81,16 @@ test -s "${NESTED_PIN}"
 test -s "${SCAFFOLD}"
 test -s "${DEVCONTAINER}"
 
-python3 - "${ROOT_PIN}" "${NESTED_PIN}" "${SCAFFOLD}" "${DEVCONTAINER}" <<'PY'
+GIT_ROOT="$(git rev-parse --show-toplevel)"
+python3 - "${ROOT_PIN}" "${NESTED_PIN}" "${SCAFFOLD}" "${DEVCONTAINER}" "${GIT_ROOT}" <<'PY'
 import glob
 import json
+import os
 import re
 import subprocess
 import sys
 
-root_path, nested_path, scaffold_path, devcontainer_path = sys.argv[1:5]
+root_path, nested_path, scaffold_path, devcontainer_path, git_root = sys.argv[1:6]
 
 CHANNEL = re.compile(r'^\s*channel\s*=\s*"([^"]+)"', re.M)
 # Both layouts are in the tree: the root file spreads the list over one entry
@@ -275,7 +277,7 @@ if not DATED.fullmatch(root_channel):
 markdown = sorted(
     path
     for path in subprocess.run(
-        ["git", "ls-files", "-z", "--", "*.md"],
+        ["git", "-C", git_root, "ls-files", "-z", "--", "*.md"],
         stdout=subprocess.PIPE,
         check=True,
     )
@@ -291,7 +293,7 @@ if len(markdown) < 20:
 
 dated = 0
 for path in markdown:
-    for number, line in enumerate(read(path).splitlines(), start=1):
+    for number, line in enumerate(read(os.path.join(git_root, path)).splitlines(), start=1):
         for token in DATED.findall(line):
             dated += 1
             if token != root_channel:

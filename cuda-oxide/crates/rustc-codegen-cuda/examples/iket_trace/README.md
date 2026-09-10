@@ -38,7 +38,7 @@ uv pip install --python .venv/bin/python nvidia-cutlass-dsl==4.7.0
 
 .venv/bin/run-iket --output-dir /tmp/iket-trace --clobber \
   profile --postprocess all -- \
-  "$PWD/crates/rustc-codegen-cuda/examples/iket_trace/target/release/iket_trace"
+  "$PWD/cuda-oxide/crates/rustc-codegen-cuda/examples/iket_trace/target/release/iket_trace"
 ```
 
 The default profile flow runs a tracker pass to choose the timestamp and

@@ -52,7 +52,7 @@ cargo oxide run const_tuple_table_lookup
 To run the repository smoketest:
 
 ```bash
-scripts/smoketest.sh -x -v '^const_tuple_table_lookup$'
+cuda-oxide/scripts/smoketest.sh -x -v '^const_tuple_table_lookup$'
 ```
 
 ## Expected output

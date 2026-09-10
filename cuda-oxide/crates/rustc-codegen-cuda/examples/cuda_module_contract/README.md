@@ -89,5 +89,5 @@ cargo oxide run cuda_module_contract
 
 # GPU-free: build, then verify launch bounds and shared-memory alignment.
 cargo oxide build cuda_module_contract
-crates/rustc-codegen-cuda/examples/cuda_module_contract/target/release/cuda_module_contract --verify-ptx
+cuda-oxide/crates/rustc-codegen-cuda/examples/cuda_module_contract/target/release/cuda_module_contract --verify-ptx
 ```

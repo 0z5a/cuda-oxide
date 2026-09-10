@@ -45,9 +45,10 @@ fn main() {
 
 fn try_main() -> Result<()> {
     let mut arguments: Vec<String> = env::args().skip(1).collect();
-    let repo_root = take_option(&mut arguments, "--repo-root")?
-        .map(PathBuf::from)
-        .unwrap_or(env::current_dir().context("get current directory")?);
+    let repo_root = match take_option(&mut arguments, "--repo-root")? {
+        Some(path) => PathBuf::from(path),
+        None => discover_simt_root()?,
+    };
     let Some(command) = arguments.first().cloned() else {
         print_usage();
         bail!("missing command");
@@ -107,6 +108,28 @@ fn try_main() -> Result<()> {
         _ => {
             print_usage();
             bail!("unknown command {command:?}")
+        }
+    }
+}
+
+fn discover_simt_root() -> Result<PathBuf> {
+    let mut directory = env::current_dir().context("get current directory")?;
+    loop {
+        if directory.join("intrinsics/overlay.toml").is_file()
+            && directory.join("crates/cuda-intrinsics-gen").is_dir()
+        {
+            return Ok(directory);
+        }
+
+        let nested = directory.join("cuda-oxide");
+        if nested.join("intrinsics/overlay.toml").is_file()
+            && nested.join("crates/cuda-intrinsics-gen").is_dir()
+        {
+            return Ok(nested);
+        }
+
+        if !directory.pop() {
+            bail!("could not find the cuda-oxide SIMT root");
         }
     }
 }

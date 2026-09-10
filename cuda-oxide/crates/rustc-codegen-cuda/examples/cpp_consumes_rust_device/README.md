@@ -62,7 +62,7 @@ has clean export names, `@llvm.used`, and `!nvvmir.version`.
 ### Step 2: Build LTOIR, link, and run GPU tests (C++ side)
 
 ```bash
-cd crates/rustc-codegen-cuda/examples/cpp_consumes_rust_device/cuda-caller
+cd cuda-oxide/crates/rustc-codegen-cuda/examples/cpp_consumes_rust_device/cuda-caller
 ./run_test.sh
 ```
 

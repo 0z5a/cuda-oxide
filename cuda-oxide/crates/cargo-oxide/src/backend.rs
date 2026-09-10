@@ -107,14 +107,20 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
 
-use crate::backend_source::{self, CODEGEN_CRATE_SUBDIR, DependencySource};
+use crate::backend_source::{self, DependencySource};
 
-/// Finds the workspace root by walking up from CWD looking for Cargo.toml
-/// with a `crates/rustc-codegen-cuda` directory.
+/// Finds the workspace root by walking up from CWD.
+///
+/// Supports both the historical single-product layout and the combined
+/// repository, where the root `Cargo.toml` owns members under
+/// `cuda-oxide/crates/`.
 pub fn find_workspace_root() -> Option<PathBuf> {
     let mut dir = std::env::current_dir().ok()?;
     loop {
-        if dir.join("crates/rustc-codegen-cuda").is_dir() && dir.join("Cargo.toml").is_file() {
+        if dir.join("Cargo.toml").is_file()
+            && (dir.join("crates/rustc-codegen-cuda").is_dir()
+                || dir.join("cuda-oxide/crates/rustc-codegen-cuda").is_dir())
+        {
             return Some(dir);
         }
         if !dir.pop() {
@@ -123,12 +129,27 @@ pub fn find_workspace_root() -> Option<PathBuf> {
     }
 }
 
+/// Returns a SIMT crate in either supported repository layout.
+pub fn simt_crate_path(workspace_root: &Path, crate_name: &str) -> PathBuf {
+    let nested_crates = workspace_root.join("cuda-oxide/crates");
+    if nested_crates.is_dir() {
+        nested_crates.join(crate_name)
+    } else {
+        workspace_root.join("crates").join(crate_name)
+    }
+}
+
+/// Returns the codegen crate in either supported repository layout.
+pub fn codegen_crate_path(workspace_root: &Path) -> PathBuf {
+    simt_crate_path(workspace_root, "rustc-codegen-cuda")
+}
+
 /// Returns the path to the codegen backend `.so`, building it if necessary.
 ///
 /// Discovery order:
 /// 1. `CUDA_OXIDE_BACKEND` env var
 /// 2. Project config (`.cargo/cuda-oxide.toml`)
-/// 3. Local repo build (crates/rustc-codegen-cuda)
+/// 3. Local repo build (cuda-oxide/crates/rustc-codegen-cuda in the combined repo)
 /// 4. Cached build at ~/.cargo/cuda-oxide/, when built from the commit the
 ///    project's cuda-oxide dependency resolves to
 /// 5. Build from the dependency's checkout (or, without one, from a `main`
@@ -160,7 +181,7 @@ pub fn find_or_build_backend(workspace_root: &Path, configured_backend: Option<&
     }
 
     // 3. Local repo
-    let codegen_crate = workspace_root.join("crates/rustc-codegen-cuda");
+    let codegen_crate = codegen_crate_path(workspace_root);
     if codegen_crate.is_dir() {
         return build_backend_from_source(&codegen_crate);
     }
@@ -196,7 +217,7 @@ fn standalone_backend(project_dir: &Path) -> PathBuf {
         if let Some(cache_dir) = cache_directory()
             && let Some(cached) = consult_backend_cache(
                 &cache_dir,
-                Some(&cache_dir.join("src").join(CODEGEN_CRATE_SUBDIR)),
+                Some(&codegen_crate_path(&cache_dir.join("src"))),
                 None,
             )
         {
@@ -439,7 +460,8 @@ fn consult_backend_cache(
 /// 2. Project config (`.cargo/cuda-oxide.toml`), returned even when missing
 ///    so the caller can report the configured-but-absent path.
 /// 3. Local repo host build path
-///    (`crates/rustc-codegen-cuda/target/<host>/debug/...`).
+///    (`cuda-oxide/crates/rustc-codegen-cuda/target/<host>/debug/...` in the
+///    combined repo).
 /// 4. For a path dependency on a cuda-oxide checkout, that checkout's host
 ///    build path (it builds in place); otherwise the cache path at
 ///    `~/.cargo/cuda-oxide/librustc_codegen_cuda.so`.
@@ -455,7 +477,7 @@ pub fn backend_so_candidate(workspace_root: &Path, configured_backend: Option<&P
         return path.to_path_buf();
     }
 
-    let codegen_crate = workspace_root.join("crates/rustc-codegen-cuda");
+    let codegen_crate = codegen_crate_path(workspace_root);
     if codegen_crate.is_dir() {
         return backend_so_path_candidate(&codegen_crate);
     }
@@ -1245,7 +1267,7 @@ fn auto_fetch_and_build() -> PathBuf {
     }
 
     refuse_unloadable_backend(&src_dir, "the cuda-oxide main clone");
-    let codegen_crate = src_dir.join(CODEGEN_CRATE_SUBDIR);
+    let codegen_crate = codegen_crate_path(&src_dir);
     let built_so = build_backend_from_source(&codegen_crate);
     if built_so.exists() {
         // A `main` clone pins nothing, so no commit is recorded: a project
@@ -1357,10 +1379,27 @@ pub fn build_ld_library_path(sysroot_lib: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend_source::CODEGEN_CRATE_SUBDIR;
     use std::ffi::OsStr;
     use std::fs::OpenOptions;
     use std::io::Write;
     use std::time::{Duration, SystemTime};
+
+    #[test]
+    fn codegen_crate_path_supports_flat_and_nested_layouts() {
+        let root = tempdir();
+        let flat = root.join("crates/rustc-codegen-cuda");
+        std::fs::create_dir_all(&flat).unwrap();
+        assert_eq!(codegen_crate_path(&root), flat);
+
+        let nested = root.join("cuda-oxide/crates/rustc-codegen-cuda");
+        std::fs::create_dir_all(&nested).unwrap();
+        assert_eq!(codegen_crate_path(&root), nested);
+        assert_eq!(
+            simt_crate_path(&root, "cuda-macros"),
+            root.join("cuda-oxide/crates/cuda-macros")
+        );
+    }
 
     /// The codegen backend is part of the cuda-oxide toolchain, not the
     /// application being debugged/sanitized. A user-supplied
