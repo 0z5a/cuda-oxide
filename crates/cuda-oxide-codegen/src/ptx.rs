@@ -646,12 +646,12 @@ fn generate_ptx_impl(
     // from the exact llc input below because linking and optimization can also
     // introduce backend intrinsics (notably llvm.stacksave/stackrestore).
     //
-    // Full-debug is a `-G`-style build: it keeps every local in memory and
-    // describes it with `llvm.dbg.declare`. Running `opt -O2` would promote
-    // those slots to registers and collapse their live ranges, turning most
-    // in-scope locals into `<optimized out>` under cuda-gdb. So we feed the
-    // unoptimized IR straight to llc when variable info is requested, matching
-    // nvcc `-G`. (llc itself is invoked at `-O0` for the same builds below.)
+    // Full-debug is a `-G`-style build: it keeps eligible imported locals in
+    // memory and describes them with `llvm.dbg.declare`. Running `opt -O2`
+    // would promote those slots to registers and collapse their live ranges,
+    // turning most in-scope locals into `<optimized out>` under cuda-gdb. So we
+    // feed the unoptimized IR straight to llc when variable info is requested,
+    // matching nvcc `-G`. (llc itself uses `-O0` for these builds below.)
     let optimized = if debug_kind.variables_enabled() {
         if opts.verbose {
             record_diagnostic(

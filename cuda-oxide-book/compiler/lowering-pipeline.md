@@ -427,9 +427,28 @@ out = DisjointSlice {ptr: 0x..., len: 1}
 
 Pliron `mem2reg` still has a promotion-aware salvage path: when it promotes a
 debug-tagged slot it emits a `mir.dbg_value` ("this source variable has this SSA
-value here") that lowers to `llvm.dbg.value`. That is the groundwork for a
-future *optimized* debug tier; the current `full` tier does not run `mem2reg`,
-so it relies on `dbg.declare` instead.
+value here") that lowers to `llvm.dbg.value`. The current `full` tier does not
+run `mem2reg`, so place-backed locals normally rely on `dbg.declare`.
+
+`ReferencePropagation` can replace a pointer assignment with an internal
+`AssignRef` event:
+
+```text
+ptr = &slice[i] -> AssignRef(ptr, slice[i])
+```
+
+Full mode carries that event across stable MIR. For the supported
+borrowed-slice index form, it writes the address into the variable's debugger
+stack slot at the same program point:
+
+```text
+AssignRef -> address of slice[i] -> ptr's debugger slot
+```
+
+The importer validates the complete event set first. Invalid or unsupported
+events omit that destination before translation, so no partial instrumentation
+is emitted. Default, line-table, and release builds are unchanged. Promotion
+salvage remains groundwork for a future *optimized* debug tier.
 
 ### Variable scopes and inlining
 

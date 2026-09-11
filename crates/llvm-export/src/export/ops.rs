@@ -945,6 +945,19 @@ impl<'a> ModuleExportState<'a> {
             emitted = true;
         }
 
+        for alias in crate::ops::debug_whole_variable_aliases(self.ctx, op.get_operation()) {
+            let Some((var_id, loc_id)) = self.debug_whole_variable_for_scope(scope, loc, &alias)
+            else {
+                continue;
+            };
+            writeln!(
+                output,
+                "  call void @llvm.dbg.declare(metadata ptr {alloca_name}, metadata !{var_id}, metadata !DIExpression()), !dbg !{loc_id}"
+            )
+            .unwrap();
+            emitted = true;
+        }
+
         for projected in crate::ops::debug_projected_variables(self.ctx, op.get_operation()) {
             let Some((var_id, loc_id)) =
                 self.debug_projected_variable_for_scope(scope, loc, &projected)
@@ -1016,6 +1029,23 @@ impl<'a> ModuleExportState<'a> {
             && let Some((var_id, loc_id)) =
                 self.debug_local_variable_for_scope(scope, loc, op.get_operation(), &info)
         {
+            write!(output, "  call void @llvm.dbg.value(metadata ").unwrap();
+            self.export_type(value.get_type(self.ctx), output)?;
+            write!(output, " ").unwrap();
+            self.export_value(value, value_names, output)?;
+            writeln!(
+                output,
+                ", metadata !{var_id}, metadata !DIExpression()), !dbg !{loc_id}"
+            )
+            .unwrap();
+            emitted = true;
+        }
+
+        for alias in crate::ops::debug_whole_variable_aliases(self.ctx, op.get_operation()) {
+            let Some((var_id, loc_id)) = self.debug_whole_variable_for_scope(scope, loc, &alias)
+            else {
+                continue;
+            };
             write!(output, "  call void @llvm.dbg.value(metadata ").unwrap();
             self.export_type(value.get_type(self.ctx), output)?;
             write!(output, " ").unwrap();
