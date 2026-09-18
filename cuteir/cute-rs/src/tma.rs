@@ -15,9 +15,9 @@
 //! the descriptor type:
 //!
 //! ```text
-//! host:    let desc: TmaDesc<f32, SmemL> = make_tma_desc_2d(...)?;
-//! kernel:  fn kernel(desc: *const TmaDesc<f32, SmemL>, ...)
-//!                                          └── same SmemL is required
+//! host:    TmaDesc<f32, SmemL>  ->  kernel: &TmaDesc<f32, SmemL>
+//!          descriptor value       #[grid_constant] parameter
+//!                     same element and layout types
 //! ```
 //!
 //! If host and kernel layouts differ, the program does not compile. A
@@ -47,12 +47,25 @@ use crate::markers::ReifySmem2D;
 /// One 128-byte TMA descriptor typed by element and shared layout.
 ///
 /// Its runtime bytes have the same layout as the CUDA driver's `CUtensorMap`.
+/// A `#[grid_constant] desc: &TmaDesc<T, SmemL>` kernel parameter takes this
+/// value at launch. Every thread borrows the same read-only descriptor bytes.
+/// The tensor data stays in device memory and must remain live until the GPU
+/// work completes.
 #[repr(C, align(64))]
 pub struct TmaDesc<T, SmemL> {
     /// Descriptor bytes produced by the CUDA driver.
     pub bytes: [u8; 128],
     /// Zero-byte marker that keeps `T` and `SmemL` in the type.
     pub marker: PhantomData<(T, SmemL)>,
+}
+
+// The type parameters describe the encoded bytes; they are not stored values.
+impl<T, SmemL> Copy for TmaDesc<T, SmemL> {}
+
+impl<T, SmemL> Clone for TmaDesc<T, SmemL> {
+    fn clone(&self) -> Self {
+        *self
+    }
 }
 
 /// Shared-memory swizzles supported by TMA.
@@ -81,9 +94,8 @@ pub enum TmaSwizzleMode {
 
 /// Requested level-2 (L2) cache fetch size for a TMA descriptor.
 ///
-/// The default is [`Self::None`] to preserve the original behavior of
-/// `make_tma_desc_2d`. CUTLASS and CuTeDSL commonly request [`Self::B128`]
-/// for GEMM input tiles.
+/// [`Self::None`] is the default used by `make_tma_desc_2d`. Select
+/// [`Self::B128`] to request a 128-byte fetch for GEMM input tiles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TmaL2Promotion {
     /// Do not request a larger L2 fetch.
@@ -104,12 +116,12 @@ pub struct TmaEncodeOptions {
 }
 
 impl TmaEncodeOptions {
-    /// Keep the original policy: do not request a larger L2 fetch.
+    /// Do not request a larger L2 fetch.
     pub const DEFAULT: Self = Self {
         l2_promotion: TmaL2Promotion::None,
     };
 
-    /// Match the usual CUTLASS/CuTeDSL input policy: fetch 128-byte sectors.
+    /// Request 128-byte L2 sectors.
     pub const L2_128B: Self = Self {
         l2_promotion: TmaL2Promotion::B128,
     };
@@ -440,6 +452,16 @@ pub use host::{TmaElement, make_tma_desc_2d, make_tma_desc_2d_with_options};
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn descriptor_value_abi_does_not_require_copy_marker_types() {
+        // Layout and element markers need not be Copy: only descriptor bytes move.
+        struct Marker;
+        fn assert_copy<T: Copy>() {}
+        assert_copy::<super::TmaDesc<Marker, Marker>>();
+        assert_eq!(core::mem::size_of::<super::TmaDesc<Marker, Marker>>(), 128);
+        assert_eq!(core::mem::align_of::<super::TmaDesc<Marker, Marker>>(), 64);
+    }
+
     use super::*;
 
     #[test]

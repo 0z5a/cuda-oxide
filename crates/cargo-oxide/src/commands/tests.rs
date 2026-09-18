@@ -2991,6 +2991,7 @@ fn passthrough_fingerprint_tracks_the_managed_cutlass_library_digest() {
         unchecked_indexing: false,
         materialize_cubin: false,
         device_debug: DeviceDebug::Off,
+        debug_assertions: false,
     };
     let mut environment = BTreeMap::from([
         (DEVICE_BACKEND_ENV.to_owned(), b"cutlass-mlir".to_vec()),
@@ -3042,6 +3043,7 @@ fn passthrough_fingerprint_tracks_explicit_cutlass_library_content() {
         unchecked_indexing: false,
         materialize_cubin: false,
         device_debug: DeviceDebug::Off,
+        debug_assertions: false,
     };
     let base_environment = BTreeMap::from([
         (DEVICE_BACKEND_ENV.to_owned(), b"cutlass-mlir".to_vec()),

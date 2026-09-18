@@ -1,11 +1,11 @@
 # Official CUTLASS translation backend
 
-Translate Rust CuTe contracts into NVIDIA's pinned CUTLASS 4.7 MLIR profile:
+Compile Rust CuTe kernels with NVIDIA's pinned CUTLASS 4.7 compiler:
 
 ![CuTe compiler flow from Rust layouts through verified MLIR and CUTLASS to a CUDA cubin](assets/cutlass-translation-flow.svg)
 
-- High-level CuTe survives preparation; reviewed mapping packs translate it
-  directly, without native CuTe expansion or prior MIR/NVVM leaf lowering.
+- Shared preparation keeps CuTe operations intact. The mapping packs translate
+  them directly to the MLIR accepted by CUTLASS.
 - Ordinary non-CuTe kernels retain the default MIR/NVVM/LLVM-to-PTX backend.
 
 ## Install and build
@@ -42,8 +42,23 @@ CUDA_OXIDE_CUTLASS_COMPILER=/absolute/path/to/libCutlassCompiler.so \
 | [Block-scaled GEMM](../examples/blockscale_gemm_cute) | Scheduler, work tiles, TMA pipelines, shared-memory MMA, epilogue stores |
 | [SM100 FP16 GEMM](../examples/fp16_gemm_256x352_cute) | Typed shared tiles, TMEM, paired two-CTA MMA, cluster TMA, producer/consumer pipelines |
 
-Block-scaled epilogue hand-offs: `ReadyForTma` emits an async-shared proxy
-publication fence, then a counted CTA barrier; `Reusable` emits only the barrier.
+At a block-scaled epilogue hand-off, `ReadyForTma` makes shared-memory writes
+visible to TMA with an async-shared proxy fence, then emits a counted CTA
+barrier. `Reusable` emits only the barrier.
+
+Grid-constant references use the same launch convention as the native backend:
+
+```text
+#[grid_constant] desc: &TmaDesc<...>
+host descriptor -> 128-byte launch argument -> device &TmaDesc<...>
+                   aligned to 64 bytes        same address for every thread
+```
+
+The backend checks the cubin's argument sizes and offsets against this layout.
+The descriptor needs no separate device allocation; the tensor allocations it
+points to must remain valid until GPU work completes. See the
+[grid-constant safety requirements](../../cuda-oxide-book/gpu-programming/kernels-and-device-functions.md#grid-constant-parameters)
+for the full launch contract.
 
 ## SM100 contracts
 
@@ -56,19 +71,20 @@ The [Rust APIs](../cute-rs/src/sm100.rs) become verified `cute.sm100_*` plans:
 | `Sm100TmaMmaPipeline`, `Sm100AccumulatorPipeline` | Buffer ownership and completion |
 | `Sm100Tmem`, `Sm100TmemEpilogue` | TMEM allocation and FP32 → FP16 epilogue |
 
-- **Verified:** layout/partition compatibility, cluster transaction bytes,
-  barrier arrivals, and allocation/MMA/copy/release lifecycle presence.
-- **Caller-owned unsafe preconditions:** dynamic phases, lane participation,
-  and pointer lifetimes.
+- **Compiler checks:** matching layouts and partitions, cluster transaction
+  bytes, barrier arrivals, and the presence of allocation, MMA, copy, and
+  release operations.
+- **Caller responsibilities:** correct dynamic phases, participating lanes,
+  and pointer lifetimes at each unsafe operation.
 - **Profile:** two CTAs; FP16 inputs, FP32 accumulation; M256/K64;
   128-byte input swizzle; 512 TMEM columns; 128×32 epilogue with 64-byte swizzle.
   The example uses N192+160 and checks CPU FP32 accumulation rounded to FP16.
 
-### CuTe and the collector leaf
+### CuTe and the A collector
 
-- Native CuTe builds shared descriptors, TMEM operations, and cluster TMA.
-- CUTLASS 4.7's native MMA atom lacks A-collector fill/last-use control.
-  The backend therefore emits an **NVVM TCGen05 MMA leaf** from the verified plan:
+- CUTLASS CuTe operations build shared descriptors, TMEM operations, and cluster TMA.
+- CUTLASS 4.7's MMA atom cannot select when to fill or release the A collector.
+  The backend emits an **NVVM TCGen05 MMA instruction** from the verified plan:
 
 ```text
 Each K16:  first N partition → fill A collector

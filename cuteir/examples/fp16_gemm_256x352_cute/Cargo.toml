@@ -11,5 +11,5 @@ description = "SM100 two-CTA persistent FP16 GEMM with a 256x352 output tile"
 cute-rs = { path = "../../cute-rs", features = ["host"] }
 cuda-device = { path = "../../../crates/cuda-device" }
 cuda-host = { path = "../../../crates/cuda-host" }
-cuda-core = { path = "../../../crates/cuda-core" }
+cuda-core = "0.3.1"
 serde_json = "1"

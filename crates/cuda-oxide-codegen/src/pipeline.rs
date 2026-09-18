@@ -187,7 +187,7 @@ pub struct ModulePipelineOutput {
     pub diagnostics: Vec<String>,
 }
 
-/// Compile an already-translated `dialect-mir` module to PTX or NVVM IR.
+/// Compile a `dialect-mir` module to PTX, NVVM IR, or a CUTLASS cubin.
 #[doc(hidden)]
 pub fn compile_translated_module(
     ctx: &mut Context,
@@ -280,9 +280,8 @@ pub fn compile_translated_module(
             .emit(format!("{}", module.deref(ctx).disp(ctx)));
     }
 
-    // This is the shared CuTe backend seam. Validate the complete semantic
-    // story once, before either a native lowering or an external compiler
-    // translation is allowed to consume it.
+    // Check tensor origins, pipeline state, and operation ordering before
+    // either backend lowers the CuTe operations.
     dialect_cute::verify::verify_cute_semantics(ctx, module).map_err(|error| {
         PipelineError::Lowering(format!(
             "dialect-cute semantic verification failed: {error}"
@@ -294,9 +293,8 @@ pub fn compile_translated_module(
     // materialization fails with its explicit-target requirement).
     materialize_iket(ctx, module, backend.target_arch.as_deref(), &backend.iket)?;
 
-    // Observe or compile the shared prepared semantic module before the
-    // ordinary inherited backend begins MIR/NVVM/LLVM lowering. Builds without
-    // an observation or CUTLASS selection do no translation-backend work.
+    // Export or compile the prepared module while CuTe operations are intact.
+    // Skip MLIR translation unless a dump or the CUTLASS backend was requested.
     let cutlass_rendered = if request.files.mlir.is_some() || request.cutlass_backend.is_some() {
         Some(render_live_cutlass_mlir(ctx, module, backend)?)
     } else {

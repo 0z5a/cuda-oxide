@@ -3,11 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! SM100 two-CTA tensor-memory GEMM building blocks.
+//! SM100 GEMM building blocks for a pair of thread blocks (CTAs).
 //!
-//! Shared layouts, the two N partitions, and the A collector lifetime are
-//! compiler-visible semantics. The scalar compiler boundary below is lowered
-//! to dialect-cute and then to CUTLASS; it has no raw CUDA implementation.
+//! Rust types describe shared-memory layouts and the two output partitions.
+//! The compiler turns these calls into CuTe operations, then uses CUTLASS to
+//! produce GPU code. Call them only inside device code.
+//!
+//! ```text
+//! global A/B -> TMA -> shared tiles -> MMA -> tensor memory -> output
+//! ```
 
 use crate::TmaDesc;
 use crate::markers::ReifySmem2D;
@@ -29,6 +33,7 @@ impl<Layout: ReifySmem2D, Role> Sm100SharedTile<Layout, Role> {
     /// Interpret existing shared storage using `Layout`.
     ///
     /// # Safety
+    ///
     /// `base` must remain live and contain every element addressed by `Layout`.
     /// TMA input bases must be aligned to their full swizzle period; the
     /// supported B128 MMA layouts require 1024-byte alignment.
@@ -52,6 +57,7 @@ impl<const COLUMNS: u32> Sm100Tmem<COLUMNS> {
     /// Allocate columns and relinquish the allocation permit.
     ///
     /// # Safety
+    ///
     /// Every lane of the allocating warp in both CTAs must participate.
     /// `token` points to a live aligned shared `u32`. Synchronize readers
     /// before loading the address written there.
@@ -64,6 +70,7 @@ impl<const COLUMNS: u32> Sm100Tmem<COLUMNS> {
     /// Return a previously allocated region after both CTAs finish using it.
     ///
     /// # Safety
+    ///
     /// All asynchronous MMA and loads must be complete and the two CTAs must
     /// rendezvous before both allocating warps call this operation.
     #[inline(always)]
@@ -75,9 +82,15 @@ impl<const COLUMNS: u32> Sm100Tmem<COLUMNS> {
 
 /// Two-CTA FP16 tiled MMA with two N partitions sharing the A collector.
 ///
-/// Each K=16 step fills A with the first N partition and consumes it for
-/// the last time with the second. The collector lifetime never crosses a K
-/// step. The complete output is `256 x (N0 + N1)` with FP32 accumulation.
+/// The A collector holds an input so two MMA instructions can reuse it:
+///
+/// ```text
+/// each K=16 step:  A x B0 -> first N0 columns   (save A)
+///                 A x B1 -> next N1 columns    (reuse, then release A)
+/// ```
+///
+/// Each step uses a fresh A input. The complete output is
+/// `256 x (N0 + N1)` with FP32 accumulation.
 pub struct Sm100TiledMma<AL, B0L, B1L, const N0: u32, const N1: u32, const K: u32 = 64>(
     PhantomData<(AL, B0L, B1L)>,
 );
@@ -91,15 +104,15 @@ impl<
 > Sm100TiledMma<AL, B0L, B1L, N0, N1, K>
 {
     const VALID: () = {
-        assert!(N0 >= 16 && N0 <= 256 && N0 % 16 == 0);
-        assert!(N1 >= 16 && N1 <= 256 && N1 % 16 == 0);
+        assert!(N0 >= 16 && N0 <= 256 && N0.is_multiple_of(16));
+        assert!(N1 >= 16 && N1 <= 256 && N1.is_multiple_of(16));
         assert!(N0 + N1 <= 512 && K == 64);
         assert!(AL::ROWS == 128 && AL::COLS == K as i64);
         assert!(B0L::ROWS == (N0 / 2) as i64 && B0L::COLS == K as i64);
         assert!(B1L::ROWS == (N1 / 2) as i64 && B1L::COLS == K as i64);
     };
 
-    /// Define the compile-time tile and collector contract.
+    /// Check the tile dimensions and create the MMA configuration.
     #[inline(always)]
     pub const fn new() -> Self {
         let () = Self::VALID;
@@ -109,6 +122,7 @@ impl<
     /// Accumulate one staged K tile into tensor memory.
     ///
     /// # Safety
+    ///
     /// One elected lane in the leader CTA issues this operation after the
     /// input pipeline wait. Both CTAs' tiles must be full and remain unchanged
     /// until the asynchronous consumer release completes. `address` names a
@@ -152,12 +166,13 @@ impl<Layout: ReifySmem2D> Sm100ClusterTmaCopy<Layout> {
     /// only its own tile; completion bytes from both CTAs accumulate at rank 0.
     ///
     /// # Safety
+    ///
     /// All 32 lanes of one producer warp in each CTA call this operation
     /// together after acquiring the stage, with identical arguments within
     /// that warp. The leader must attach exactly one expectation covering both
     /// CTAs' copies to the same stage and phase. The native CuTe copy elects
-    /// its issuing lane internally and may synchronize
-    /// the warp. Calling it from an already elected lane can deadlock when
+    /// one lane to issue the copy and may synchronize the warp.
+    /// Calling it from an already elected lane can deadlock when
     /// pipeline stages are reused.
     ///
     /// The descriptor must encode `Layout`, destination storage must be valid
@@ -177,12 +192,13 @@ impl<Layout: ReifySmem2D> Sm100ClusterTmaCopy<Layout> {
     }
 }
 
-/// Drain one 128x32 FP32 accumulator slice to a laid-out FP16 shared tile.
+/// Convert one 128x32 FP32 accumulator slice to an FP16 tile in shared memory.
 pub struct Sm100TmemEpilogue<Layout>(PhantomData<Layout>);
 impl<Layout: ReifySmem2D> Sm100TmemEpilogue<Layout> {
     /// Load a lane's 32 accumulators, add its row bias, and convert to FP16.
     ///
     /// # Safety
+    ///
     /// All lanes of the four epilogue warps participate after accumulator wait.
     /// `address` already selects the calling warp's 32 TMEM rows and current
     /// 32-column slice. `tid` is the CTA thread index in `0..128`. `dst` has
@@ -204,6 +220,7 @@ impl<Layout: ReifySmem2D> Sm100TmemEpilogue<Layout> {
     /// Start the FP16 tile's asynchronous shared-to-global TMA store.
     ///
     /// # Safety
+    ///
     /// One elected store issuer calls after all writers publish their shared
     /// writes and synchronize. The descriptor encodes `Layout`; coordinates
     /// count elements. The shared source must remain live and unchanged until
@@ -223,8 +240,9 @@ impl<Layout: ReifySmem2D> Sm100TmemEpilogue<Layout> {
 
 /// Two-CTA TMA-to-MMA stage ring, with one completion arrival per stage.
 ///
-/// `TX_BYTES` includes every copy from both CTAs. The elected leader produces
-/// the expectation, and asynchronous MMA completion releases both CTAs.
+/// `TX_BYTES` is the total number of bytes copied by both CTAs per stage.
+/// One lane in the leader CTA sets this expected byte count. MMA completion
+/// releases the stage in both CTAs so the next TMA copy can reuse it.
 pub struct Sm100TmaMmaPipeline<const STAGES: u32, const TX_BYTES: u32> {
     full: *mut Barrier,
     empty: *mut Barrier,
@@ -234,6 +252,7 @@ impl<const STAGES: u32, const TX_BYTES: u32> Sm100TmaMmaPipeline<STAGES, TX_BYTE
     /// Attach separate full and empty barrier arrays.
     ///
     /// # Safety
+    ///
     /// Each pointer addresses `STAGES` aligned shared barriers exclusively
     /// used by this pipeline until all consumers and producers finish.
     #[inline(always)]
@@ -244,6 +263,7 @@ impl<const STAGES: u32, const TX_BYTES: u32> Sm100TmaMmaPipeline<STAGES, TX_BYTE
     /// Initialize both arrays from one elected lane per CTA.
     ///
     /// # Safety
+    ///
     /// Publish barrier initialization and synchronize the cluster before use.
     #[inline(always)]
     pub unsafe fn init(&self) {
@@ -252,6 +272,7 @@ impl<const STAGES: u32, const TX_BYTES: u32> Sm100TmaMmaPipeline<STAGES, TX_BYTE
     /// Wait for a reusable stage, with producer phase initially one.
     ///
     /// # Safety
+    ///
     /// `stage < STAGES`; `phase` must be the producer's current ring phase.
     #[inline(always)]
     pub unsafe fn producer_acquire(&self, stage: u32, phase: u32) {
@@ -260,6 +281,7 @@ impl<const STAGES: u32, const TX_BYTES: u32> Sm100TmaMmaPipeline<STAGES, TX_BYTE
     /// Attach the complete cluster's expected copy bytes to this full barrier.
     ///
     /// # Safety
+    ///
     /// Exactly one elected lane of rank zero calls this after acquire.
     #[inline(always)]
     pub unsafe fn producer_expect(&self, stage: u32) {
@@ -268,6 +290,7 @@ impl<const STAGES: u32, const TX_BYTES: u32> Sm100TmaMmaPipeline<STAGES, TX_BYTE
     /// Return the stage's local completion barrier for typed TMA copies.
     ///
     /// # Safety
+    ///
     /// `stage < STAGES`. Copies using this barrier must belong to the acquired
     /// stage and phase covered by the leader's one cluster-wide expectation.
     #[inline(always)]
@@ -277,6 +300,7 @@ impl<const STAGES: u32, const TX_BYTES: u32> Sm100TmaMmaPipeline<STAGES, TX_BYTE
     /// Wait for input copies and order subsequent tensor-core operations.
     ///
     /// # Safety
+    ///
     /// Rank zero's MMA warp calls with its current consumer stage and phase.
     #[inline(always)]
     pub unsafe fn consumer_wait(&self, stage: u32, phase: u32) {
@@ -285,6 +309,7 @@ impl<const STAGES: u32, const TX_BYTES: u32> Sm100TmaMmaPipeline<STAGES, TX_BYTE
     /// Signal both CTAs' empty barriers after pending MMA reads finish.
     ///
     /// # Safety
+    ///
     /// One elected lane in the leader CTA calls after issuing all stage MMAs.
     #[inline(always)]
     pub unsafe fn consumer_release(&self, stage: u32) {
@@ -302,6 +327,7 @@ impl<const CONSUMER_WARPS: u32> Sm100AccumulatorPipeline<CONSUMER_WARPS> {
     /// Attach the shared empty and full barriers.
     ///
     /// # Safety
+    ///
     /// Both pointers address distinct aligned barriers exclusively owned by
     /// this pipeline. Each CTA has `CONSUMER_WARPS` epilogue consumer warps.
     #[inline(always)]
@@ -312,6 +338,7 @@ impl<const CONSUMER_WARPS: u32> Sm100AccumulatorPipeline<CONSUMER_WARPS> {
     /// Initialize from one elected lane in each CTA, before cluster publication.
     ///
     /// # Safety
+    ///
     /// No pipeline operation may run until initialization is visible cluster-wide.
     #[inline(always)]
     pub unsafe fn init(&self) {
@@ -320,6 +347,7 @@ impl<const CONSUMER_WARPS: u32> Sm100AccumulatorPipeline<CONSUMER_WARPS> {
     /// Wait for all epilogue warps to release the previous accumulator tile.
     ///
     /// # Safety
+    ///
     /// Only the leader CTA's MMA warp acquires; its initial phase is one.
     #[inline(always)]
     pub unsafe fn producer_acquire(&self, phase: u32) {
@@ -328,6 +356,7 @@ impl<const CONSUMER_WARPS: u32> Sm100AccumulatorPipeline<CONSUMER_WARPS> {
     /// Publish the tile to both CTAs after all pending MMA operations finish.
     ///
     /// # Safety
+    ///
     /// One elected lane in the leader CTA calls after the final K stage.
     #[inline(always)]
     pub unsafe fn producer_commit(&self) {
@@ -336,6 +365,7 @@ impl<const CONSUMER_WARPS: u32> Sm100AccumulatorPipeline<CONSUMER_WARPS> {
     /// Wait for a full accumulator tile and order tensor-memory loads.
     ///
     /// # Safety
+    ///
     /// Consumer warps pass their current phase, initially zero.
     #[inline(always)]
     pub unsafe fn consumer_wait(&self, phase: u32) {
@@ -344,6 +374,7 @@ impl<const CONSUMER_WARPS: u32> Sm100AccumulatorPipeline<CONSUMER_WARPS> {
     /// Release this warp's portion of the accumulator back to the leader.
     ///
     /// # Safety
+    ///
     /// Every lane in every epilogue warp calls after completing its tensor-
     /// memory reads. The operation fences all lanes and internally elects
     /// one lane to arrive at the leader CTA barrier.
@@ -381,7 +412,7 @@ impl<const STAGES: u32> Sm100TmaStorePipeline<STAGES> {
     }
 }
 
-/// Stable semantic compiler boundaries; never execute on the host.
+/// Calls recognized by the compiler; never execute these on the host.
 #[doc(hidden)]
 #[allow(missing_docs)]
 pub mod __compiler {
@@ -412,8 +443,8 @@ pub mod __compiler {
         let _ = (tmem, dst, tid, bias, PhantomData::<L>);
         unreachable!("SM100 CuTe marker requires device compilation")
     }
-    // Collective boundary: every lane of one producer warp participates.
-    // The native CuTe load owns election and any required warp synchronization.
+    // Every lane of the producer warp participates. CuTe selects the issuing
+    // lane and performs any required warp synchronization.
     #[inline(never)]
     pub unsafe fn sm100_cluster_tma_load<L>(
         desc: *const TmaDesc<f16, L>,

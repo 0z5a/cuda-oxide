@@ -84,7 +84,13 @@ while IFS= read -r manifest; do
             fi
         done < <(grep -E "^([A-Za-z0-9_-]+[[:space:]]*=[[:space:]]*\{[^}]*package[[:space:]]*=[[:space:]]*\"${crate}\"|${crate}[[:space:]]*=)" "${manifest}" || true)
     done
-done < <(git ls-files 'crates/rustc-codegen-cuda/examples/*/Cargo.toml' 'crates/rustc-codegen-cuda/examples/*/*/Cargo.toml' 'crates/rustc-codegen-cuda/examples/*/*/*/Cargo.toml')
+done < <(git ls-files \
+    'crates/rustc-codegen-cuda/examples/*/Cargo.toml' \
+    'crates/rustc-codegen-cuda/examples/*/*/Cargo.toml' \
+    'crates/rustc-codegen-cuda/examples/*/*/*/Cargo.toml' \
+    'cuteir/examples/*/Cargo.toml' \
+    'cuteir/examples/*/*/Cargo.toml' \
+    'cuteir/examples/*/*/*/Cargo.toml')
 
 # 2. The scaffold constant.
 scaffold_version="$(sed -n -E 's/^pub\(super\) const SHARED_HOST_CRATES_VERSION: &str = "([^"]+)";/\1/p' "${SCAFFOLD}")"

@@ -8,7 +8,7 @@
 mod kernel;
 
 use cuda_core::{CudaContext, CudaStream, DeviceBuffer, LaunchConfig1D, sys};
-use cute_rs::tma::{TmaDesc, make_tma_desc_2d};
+use cute_rs::tma::make_tma_desc_2d;
 use serde_json::json;
 use std::{
     error::Error,
@@ -41,6 +41,8 @@ impl TimingMode {
 }
 
 struct Args {
+    rust_only: bool,
+    python: Option<PathBuf>,
     m: u32,
     n: u32,
     k: u32,
@@ -59,6 +61,8 @@ struct Args {
 impl Args {
     fn parse() -> Result<Self> {
         let mut args = Self {
+            rust_only: false,
+            python: None,
             m: 256,
             n: 352,
             k: 64,
@@ -73,17 +77,20 @@ impl Args {
             json: None,
             skip_cpu_check: false,
         };
+        let mut timing_mode_explicit = false;
+        let mut graph_launches_explicit = false;
         let mut cli = std::env::args().skip(1);
         while let Some(key) = cli.next() {
             match key.as_str() {
                 "--help" | "-h" => {
                     println!(
-                        "fp16_gemm_256x352_cute [--mnk M,N,K] [--has-bias] [--warmup 25] [--iters 100]\n  [--timing-mode direct|graph] [--graph-launches 10] [--clusters COUNT] [--input-dir DIR] [--output C.f16] [--json RESULT.json]\n  [--skip-cpu-check] (requires --input-dir and --output; external oracle mode)\nTiming defaults to graph; direct times exactly one kernel launch per event pair.\nDirect --warmup 0 --iters 1 launches once total and verifies that timed output.\n--graph-launches applies only to graph timing.\nM must be a positive multiple of 256, N and K of 8. SM100 GPU required."
+                        "fp16_gemm_256x352_cute [--mnk M,N,K] [--has-bias] [--warmup 25] [--iters 100]\n  [--clusters COUNT] [--json RESULT.json] [--python PATH]\nDefault: verify and compare CuTe DSL and cuda-oxide with direct CUDA-event timing.\nPrints two performance lines; --json saves the combined report.\nPython selection: --python, CUDA_OXIDE_CUTE_PYTHON, example .venv, then python3.\nRequires the local compare.py and reference/ assets.\n\n--rust-only runs cuda-oxide alone with CPU verification and JSON output:\n  [--timing-mode direct|graph] [--graph-launches 10] [--input-dir DIR] [--output C.f16]\n  [--skip-cpu-check] (requires --input-dir and --output; external oracle mode)\nRust-only timing defaults to graph; comparison supports direct timing only.\nDirect --warmup 0 --iters 1 launches each selected implementation exactly once.\nM must be a positive multiple of 256, N and K of 8. SM100 GPU required."
                     );
                     std::process::exit(0);
                 }
                 "--has-bias" | "--has_bias" => args.has_bias = true,
                 "--skip-cpu-check" => args.skip_cpu_check = true,
+                "--rust-only" => args.rust_only = true,
                 _ => {
                     let value = cli
                         .next()
@@ -101,8 +108,12 @@ impl Args {
                         }
                         "--warmup" => args.warmup = value.parse()?,
                         "--iters" => args.iters = value.parse()?,
-                        "--graph-launches" => args.graph_launches = value.parse()?,
+                        "--graph-launches" => {
+                            args.graph_launches = value.parse()?;
+                            graph_launches_explicit = true;
+                        }
                         "--timing-mode" => {
+                            timing_mode_explicit = true;
                             args.timing_mode = match value.as_str() {
                                 "direct" => TimingMode::Direct,
                                 "graph" => TimingMode::Graph,
@@ -113,17 +124,34 @@ impl Args {
                         "--input-dir" => args.input_dir = Some(value.into()),
                         "--output" => args.output = Some(value.into()),
                         "--json" => args.json = Some(value.into()),
+                        "--python" => args.python = Some(value.into()),
                         _ => return Err(format!("unknown argument {key}").into()),
                     }
                 }
             }
         }
+        if !args.rust_only {
+            if !timing_mode_explicit {
+                args.timing_mode = TimingMode::Direct;
+            }
+            if !graph_launches_explicit {
+                args.graph_launches = 1;
+            }
+            if args.timing_mode != TimingMode::Direct || args.graph_launches != 1 {
+                return Err("CuTe DSL comparison requires direct timing and --graph-launches 1; use --rust-only for graph timing".into());
+            }
+            if args.input_dir.is_some() || args.output.is_some() || args.skip_cpu_check {
+                return Err("--input-dir, --output, and --skip-cpu-check require --rust-only; comparison supplies identical inputs and verifies both outputs".into());
+            }
+        } else if args.python.is_some() {
+            return Err("--python applies only to the CuTe DSL comparison".into());
+        }
         if args.m == 0
             || args.n == 0
             || args.k == 0
-            || args.m % 256 != 0
-            || args.n % 8 != 0
-            || args.k % 8 != 0
+            || !args.m.is_multiple_of(256)
+            || !args.n.is_multiple_of(8)
+            || !args.k.is_multiple_of(8)
         {
             return Err("require positive M divisible by 256, N and K by 8".into());
         }
@@ -132,8 +160,7 @@ impl Args {
         }
         // The last N tile issues all eleven stores even when some are
         // out-of-bounds. Their starting coordinates must remain positive
-        // after the kernel casts to i32. Bounds above also make n+351 and
-        // k+63 safe in the kernel's u32 ceil divisions.
+        // after the kernel casts to i32.
         let ntiles = args.n.div_ceil(352);
         let last_store_col = u64::from(ntiles - 1) * 352 + 320;
         if last_store_col > i32::MAX as u64 {
@@ -170,6 +197,60 @@ impl Args {
         }
         Ok(args)
     }
+}
+
+fn compare(args: &Args) -> Result<()> {
+    let directory = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let script = directory.join("compare.py");
+    if !script.is_file() || !directory.join("reference/fp16_gemm_3_256x352.py").is_file() {
+        return Err(format!(
+            "CuTe DSL comparison requires the local compare.py and reference/ assets in {}; use --rust-only for standalone execution",
+            directory.display()
+        )
+        .into());
+    }
+    let local_python = directory.join(".venv/bin/python");
+    let python = args
+        .python
+        .clone()
+        .or_else(|| std::env::var_os("CUDA_OXIDE_CUTE_PYTHON").map(PathBuf::from))
+        .unwrap_or_else(|| {
+            if local_python.is_file() {
+                local_python
+            } else {
+                PathBuf::from("python3")
+            }
+        });
+    // Start Python before creating a CUDA context. It runs this executable
+    // with --rust-only, using the same input bytes for both implementations.
+    let mut command = std::process::Command::new(&python);
+    command
+        .arg(script)
+        .arg("--rust-bin")
+        .arg(std::env::current_exe()?)
+        .args(["--mnk", &format!("{},{},{}", args.m, args.n, args.k)])
+        .args(["--warmup", &args.warmup.to_string()])
+        .args(["--iters", &args.iters.to_string()])
+        .args(["--timing-mode", "direct", "--graph-launches", "1"]);
+    if args.has_bias {
+        command.arg("--has-bias");
+    }
+    if let Some(clusters) = args.clusters {
+        command.args(["--clusters", &clusters.to_string()]);
+    }
+    if let Some(path) = &args.json {
+        command.arg("--json").arg(path);
+    }
+    let status = command.status().map_err(|error| {
+        format!(
+            "could not start CuTe DSL comparison with {}: {error}; select its Python environment with --python or CUDA_OXIDE_CUTE_PYTHON",
+            python.display()
+        )
+    })?;
+    if !status.success() {
+        return Err(format!("CuTe DSL comparison failed ({status})").into());
+    }
+    Ok(())
 }
 
 fn cuda_status(status: sys::CUresult, operation: &str) -> Result<()> {
@@ -273,8 +354,10 @@ fn load_f16(path: &Path, count: usize) -> Result<Vec<u16>> {
         .into());
     }
     Ok(bytes
-        .chunks_exact(2)
-        .map(|v| u16::from_le_bytes([v[0], v[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|v| u16::from_le_bytes(*v))
         .collect())
 }
 
@@ -288,8 +371,8 @@ fn store_f16(path: &Path, data: &[u16]) -> Result<()> {
     Ok(())
 }
 
-// Reproducible integer inputs use the oracle's exact FP16 domain [-2,2).
-// compare.py supplies the oracle's actual seeded PyTorch buffers instead.
+// The standalone run uses reproducible integers in [-2, 2), exact in FP16.
+// compare.py supplies the same seeded PyTorch inputs to both implementations.
 fn integer_input(count: usize, mut state: u32) -> Vec<u16> {
     (0..count)
         .map(|_| {
@@ -336,6 +419,9 @@ fn verify(args: &Args, a: &[u16], b: &[u16], bias: &[u16], got: &[u16]) -> Resul
 
 fn main() -> Result<()> {
     let args = Args::parse()?;
+    if !args.rust_only {
+        return compare(&args);
+    }
     let single_launch =
         args.timing_mode == TimingMode::Direct && args.warmup == 0 && args.iters == 1;
     let ctx = CudaContext::new(0)?;
@@ -375,8 +461,8 @@ fn main() -> Result<()> {
     let bias_dev = DeviceBuffer::from_host(&stream, &bias)?;
     // Poison the output so missing tiles, including N tails, fail verification.
     let mut c_dev = DeviceBuffer::from_host(&stream, &vec![f16::NAN.to_bits(); m * n])?;
-    // The same layout types describe the host TMA box/swizzle and the
-    // device shared-memory tensors, so these contracts cannot drift apart.
+    // These layout types set both the descriptor's tile shape and swizzle
+    // and the kernel's shared-memory layout.
     let a_desc = make_tma_desc_2d::<f16, kernel::ASmem>(
         a_dev.cu_deviceptr() as *mut core::ffi::c_void,
         u64::from(args.m),
@@ -401,13 +487,6 @@ fn main() -> Result<()> {
         u64::from(args.n),
         u64::from(args.n),
     )?;
-    // Each allocation contains exactly one descriptor's 128 encoded bytes.
-    // CUDA device allocations satisfy TmaDesc's 64-byte alignment, and the
-    // buffers remain alive until every direct launch or graph replay completes.
-    let a_desc_dev = DeviceBuffer::from_host(&stream, &a_desc.bytes)?;
-    let b0_desc_dev = DeviceBuffer::from_host(&stream, &b0_desc.bytes)?;
-    let b1_desc_dev = DeviceBuffer::from_host(&stream, &b1_desc.bytes)?;
-    let c_desc_dev = DeviceBuffer::from_host(&stream, &c_desc.bytes)?;
     // SAFETY: this executable exclusively owns the module and all its buffers.
     let module = unsafe { kernel::kernels::load(&ctx) }?;
     let tiles = (args.m / 256)
@@ -416,12 +495,12 @@ fn main() -> Result<()> {
     let blocks = tiles.checked_mul(2).ok_or("grid size overflow")?;
     let probe = module.prepare_fp16_gemm_256x352(LaunchConfig1D::new(
         2,
-        kernel::THREADS as u32,
+        kernel::THREADS,
         kernel::DYNAMIC_SMEM_BYTES as u32,
     ))?;
     let capacity = probe.function().max_active_clusters(
         (blocks, 1, 1),
-        (kernel::THREADS as u32, 1, 1),
+        (kernel::THREADS, 1, 1),
         kernel::DYNAMIC_SMEM_BYTES as u32,
         (2, 1, 1),
     )?;
@@ -436,26 +515,29 @@ fn main() -> Result<()> {
     drop(probe);
     let launch = module.prepare_fp16_gemm_256x352(LaunchConfig1D::new(
         clusters * 2,
-        kernel::THREADS as u32,
+        kernel::THREADS,
         kernel::DYNAMIC_SMEM_BYTES as u32,
     ))?;
     let run = || -> Result<()> {
-        // Descriptors address live allocations; the prepared contract
-        // fixes block, cluster and shared-memory shape. Persistent tiles are
-        // disjoint, and the tensors satisfy the kernel's shape constraints.
-        module.fp16_gemm_256x352(
-            &stream,
-            &launch,
-            a_desc_dev.cu_deviceptr() as *const TmaDesc<f16, kernel::ASmem>,
-            b0_desc_dev.cu_deviceptr() as *const TmaDesc<f16, kernel::B0Smem>,
-            b1_desc_dev.cu_deviceptr() as *const TmaDesc<f16, kernel::B1Smem>,
-            c_desc_dev.cu_deviceptr() as *const TmaDesc<f16, kernel::CSmem>,
-            bias_dev.cu_deviceptr() as *const f16,
-            u64::from(args.m),
-            u64::from(args.n),
-            u64::from(args.k),
-            u64::from(args.has_bias),
-        )?;
+        // SAFETY: each descriptor is copied into read-only kernel parameters.
+        // We keep all tensor buffers alive until the stream finishes. The
+        // prepared launch checks block, cluster, and shared-memory sizes.
+        // Output tiles do not overlap, and the tensor shapes were checked above.
+        unsafe {
+            module.fp16_gemm_256x352(
+                &stream,
+                &launch,
+                a_desc,
+                b0_desc,
+                b1_desc,
+                c_desc,
+                bias_dev.cu_deviceptr() as *const f16,
+                u64::from(args.m),
+                u64::from(args.n),
+                u64::from(args.k),
+                u64::from(args.has_bias),
+            )?;
+        }
         Ok(())
     };
     // A single direct sample verifies its timed output without a preliminary launch.

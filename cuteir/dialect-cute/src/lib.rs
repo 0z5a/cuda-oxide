@@ -5,20 +5,19 @@
 
 //! CuTe dialect definition.
 //!
-//! Models the CuTe layout algebra as first-class pliron ops, types, and
-//! attributes, coexisting in one module with dialect-mir control flow and
-//! scalar operations.
+//! Represents CuTe layouts and operations in Pliron, alongside MIR control
+//! flow and scalar operations.
 //!
 //! Layouts are stored as typed attributes backed by `cute-layout` (never as
-//! strings); result types of algebra ops are computed with `cute-layout` at
-//! IR-build time. The backend-neutral verifier checks the complete semantic
-//! graph before any backend continuation begins.
+//! strings). Layout operations compute their result types when the IR is
+//! built. The verifier checks how tensors, copies, pipelines, and MMA
+//! operations fit together before a backend lowers them.
 //!
 //! The implemented surface is deliberately narrow: elementwise tensor tiles,
 //! one block-scaled GEMV fragment flow, raw-carrier TMA views for the four GEMM
 //! stage copies, shared-tensor/tiled-MMA compute, and SM100 two-CTA tensor
 //! memory with collector-aware MMA, cluster TMA, and asynchronous pipelines.
-//! These semantic operations are consumed by the selected backend continuation.
+//! The selected backend lowers these operations to GPU code.
 
 pub mod attributes;
 pub mod epilogue_ops;
@@ -33,9 +32,7 @@ pub mod tensor_ops;
 pub mod types;
 pub mod verify;
 
-/// Re-export of the layout algebra so consumers (mir-importer's recognition
-/// module and backend continuations) depend only on `dialect-cute` and reach
-/// the algebra through it.
+/// Layout math shared by the importer, verifier, and backends.
 pub use cute_layout as layout;
 
 use pliron::attribute::Attribute;
@@ -55,7 +52,7 @@ pub fn register(ctx: &mut Context) {
     sm100_ops::register(ctx);
 
     // The #[pliron_op]/#[pliron_attr] macros auto-register via Context::default;
-    // explicit registration is the idempotent house convention.
+    // registering them again is safe and matches the other dialects.
     ops::CuteCopyOp::register(ctx);
     ops::CuteAssumeDivOp::register(ctx);
     ops::CuteCopyG2SOp::register(ctx);

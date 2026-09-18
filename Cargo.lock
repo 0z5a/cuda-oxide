@@ -518,9 +518,10 @@ dependencies = [
  "pliron",
  "pliron-derive",
  "pliron-mlir-export",
+ "reserved-oxide-symbols",
  "serde",
  "serde_json",
- "thiserror",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -541,6 +542,7 @@ dependencies = [
  "trybuild",
 ]
 
+[[package]]
 name = "dashmap"
 version = "6.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -565,7 +567,7 @@ dependencies = [
  "once_cell",
  "pliron",
  "pliron-derive",
- "thiserror",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1236,7 +1238,7 @@ version = "0.1.0"
 dependencies = [
  "pliron",
  "pliron-derive",
- "thiserror",
+ "thiserror 2.0.18",
 ]
 
 [[package]]

@@ -239,6 +239,7 @@ dependencies = [
  "llvm-export",
  "pliron",
  "pliron-mlir-export",
+ "reserved-oxide-symbols",
  "serde",
  "serde_json",
  "thiserror",

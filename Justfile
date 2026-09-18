@@ -64,7 +64,8 @@ test:
         -p cuda-device -p libnvvm-sys -p nvjitlink-sys \
         -p cuda-artifact-finalizer -p cargo-oxide \
         -p dialect-iket -p iket-lower -p ptx-parse -p dialect-ptx \
-        -p ptx-schedule
+        -p ptx-schedule -p cute-layout -p cute-rs -p dialect-cute \
+        -p pliron-mlir-export -p cuda-oxide-mlir-export
     # `default = []`, but every consumer turns the object features on, and the
     # default set alone skips the eight ELF emit/extract tests.
     cargo test -p oxide-artifacts --all-targets --features object

@@ -40,8 +40,8 @@ type MainloopPipeline = Sm100TmaMmaPipeline<5, 77_824>;
 type AccumulatorPipeline = Sm100AccumulatorPipeline<4>;
 type TiledMma = Sm100TiledMma<ASmem, B0Smem, B1Smem, 192, 160>;
 
-// Only the allocation rendezvous uses an ordinary cluster barrier. Operand
-// and accumulator lifetimes are described by the CuTe pipelines below.
+// Wait for both CTAs before freeing tensor memory. The CuTe pipelines below
+// track when input tiles and accumulators can be reused.
 #[inline(always)]
 unsafe fn wait_deallocation(bar: *const Barrier) {
     unsafe { while !mbarrier_try_wait_parity_cluster(bar, 0) {} }
@@ -51,8 +51,10 @@ unsafe fn wait_deallocation(bar: *const Barrier) {
 pub mod kernels {
     use super::*;
 
-    /// Requires a (2,1,1) cluster launch and the four tensor maps documented
-    /// in README.md. All pointers must remain live through stream completion.
+    /// Compute output tiles with a (2,1,1) cluster and four typed tensor maps.
+    ///
+    /// Each map is passed by value; all threads borrow its read-only bytes.
+    /// The tensor allocations must remain live until the stream finishes.
     #[launch_bounds(192)]
     #[cluster_launch(2, 1, 1)]
     #[launch_contract(
@@ -63,19 +65,20 @@ pub mod kernels {
         min_compute_capability = (10, 0),
     )]
     #[kernel]
+    #[allow(clippy::too_many_arguments)] // Keep each tensor map explicit in the signature.
     pub fn fp16_gemm_256x352(
-        a: *const TmaDesc<f16, ASmem>,
-        b0: *const TmaDesc<f16, B0Smem>,
-        b1: *const TmaDesc<f16, B1Smem>,
-        c: *const TmaDesc<f16, CSmem>,
+        #[grid_constant] a: &TmaDesc<f16, ASmem>,
+        #[grid_constant] b0: &TmaDesc<f16, B0Smem>,
+        #[grid_constant] b1: &TmaDesc<f16, B1Smem>,
+        #[grid_constant] c: &TmaDesc<f16, CSmem>,
         bias: *const f16,
         m: u64,
         n: u64,
         k: u64,
         has_bias: u64,
     ) {
-        // The pinned backend's direct-launch scalar ABI uses 64-bit carriers.
-        // Host validation bounds all dimensions before these device casts.
+        // The CUTLASS launch ABI uses 64-bit scalar arguments. The host checks
+        // that each dimension fits before the kernel converts it to u32.
         let m = m as u32;
         let n = n as u32;
         let k = k as u32;
@@ -84,8 +87,8 @@ pub mod kernels {
         let warp_id = tid / 32;
         let rank = cluster::block_rank();
         let smem = DynamicSharedArray::<u8, 1024>::get_raw();
-        // ABI: A[5], B[5], C[2], full[5], empty[5], acc_empty,
-        // acc_full, dealloc, tmem_token. All operand bases are B128 aligned.
+        // Shared storage: A[5], B[5], C[2], full[5], empty[5], acc_empty,
+        // acc_full, dealloc, tmem_token. Tile bases are 1024-byte aligned.
         unsafe {
             let full = smem.add(BARRIER_OFFSET).cast::<Barrier>();
             let empty = full.add(STAGES);
@@ -98,10 +101,10 @@ pub mod kernels {
             let mma = TiledMma::new();
             let stores = Sm100TmaStorePipeline::<2>::new();
             if warp_id == 4 {
-                prefetch_tma_descriptor(a.cast());
-                prefetch_tma_descriptor(b0.cast());
-                prefetch_tma_descriptor(b1.cast());
-                prefetch_tma_descriptor(c.cast());
+                prefetch_tma_descriptor((a as *const TmaDesc<f16, ASmem>).cast());
+                prefetch_tma_descriptor((b0 as *const TmaDesc<f16, B0Smem>).cast());
+                prefetch_tma_descriptor((b1 as *const TmaDesc<f16, B1Smem>).cast());
+                prefetch_tma_descriptor((c as *const TmaDesc<f16, CSmem>).cast());
             }
             if warp_id == 0 && warp::is_elected_sync(u32::MAX) {
                 mbarrier_init(dealloc, 32);
@@ -111,12 +114,12 @@ pub mod kernels {
             fence_mbarrier_init_release_cluster();
             cluster::barrier_cluster_arrive_relaxed();
 
-            // Default source scheduler: M-major, one logical tile per cluster.
+            // Each cluster visits output tiles in M-first order.
             let mtiles = m / 256;
-            let total_tiles = mtiles * ((n + 351) / 352);
+            let total_tiles = mtiles * n.div_ceil(352);
             let mut tile = thread::blockIdx_x() / 2;
             let tile_stride = thread::gridDim_x() / 2;
-            let ktiles = (k + 63) / 64;
+            let ktiles = k.div_ceil(64);
             cluster::barrier_cluster_wait();
 
             if warp_id == 5 {
@@ -206,8 +209,8 @@ pub mod kernels {
                                 smem.add(B_OFFSET + stage * B_BYTES + 96 * 64 * 2).cast(),
                             );
                             if warp::is_elected_sync(u32::MAX) {
-                                // The paired tile owns the A collector lifetime for
-                                // each of the four K16 instructions in this stage.
+                                // Each of the four K16 steps reuses A across
+                                // the two N partitions, then releases it.
                                 mma.gemm(tmem, &a_tile, &b0_tile, &b1_tile, accumulate);
                                 pipeline.consumer_release(stage as u32);
                             }

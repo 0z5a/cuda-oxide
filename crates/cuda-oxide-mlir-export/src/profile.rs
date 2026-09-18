@@ -79,10 +79,10 @@ pub trait MlirConsumerProfile {
     }
 }
 
-/// Full CuTe dialect accepted by the pinned official CUTLASS 4.7 compiler.
+/// CuTe mappings supported by the pinned CUTLASS 4.7 compiler.
 ///
-/// This is intentionally versioned. A different public CUTLASS release is a
-/// different profile until its syntax, lowering, and runtime gates pass.
+/// Each CUTLASS release needs its own profile until its syntax, generated code,
+/// and runtime behavior have passed validation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CutlassFullCuteMlir22 {
     gpu_arch: String,
@@ -134,8 +134,8 @@ impl MlirConsumerProfile for CutlassFullCuteMlir22 {
     }
 
     fn verify_source_module(&self, ctx: &Context, module: &ModuleOp) -> Result<(), ProfileError> {
-        // Every backend enters through the same immutable whole-module CuTe
-        // graph/provenance checks before selecting its continuation.
+        // Both backends check the same CuTe operation graph and tensor origins
+        // before generating code. Verification leaves the module unchanged.
         dialect_cute::verify::verify_cute_semantics(ctx, module.get_operation())
             .map_err(|error| ProfileError::CuteSemantics(error.to_string()))
     }

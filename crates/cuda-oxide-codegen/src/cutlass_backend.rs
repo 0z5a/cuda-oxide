@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! Executable Backend-B boundary for the official CUTLASS compiler library.
+//! Compile MLIR with the pinned CUTLASS library and validate its CUDA image.
 
 use crate::cutlass_compiler::CutlassCompilerLibrary;
 use crate::error::PipelineError;
@@ -47,7 +47,11 @@ mod sm100_tests;
 #[path = "tests/cutlass/tcgen05.rs"]
 mod tcgen05_tests;
 
-/// External input needed to execute the official CUTLASS Backend B.
+#[cfg(test)]
+#[path = "tests/cutlass/grid_constant.rs"]
+mod grid_constant_tests;
+
+/// Compiler library and MLIR profile used by the CUTLASS backend.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CutlassBackendConfig {
     /// Absolute path to the exact `libCutlassCompiler.so` installed by
@@ -70,7 +74,7 @@ impl CutlassBackendConfig {
 /// Device compiler selected after the shared MIR/CuTe preparation stages.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum DeviceBackend {
-    /// Ordinary CUDA Oxide MIR/NVVM/LLVM backend inherited from main.
+    /// CUDA Oxide MIR/NVVM/LLVM backend.
     #[default]
     Native,
     /// Official CUTLASS compiler-library path, producing a CUDA image.
@@ -86,17 +90,28 @@ pub(crate) struct CutlassRunOutput {
 enum KernelParameterKind {
     GlobalPointer64,
     Scalar64,
+    GridConstant { size: u16, alignment: u16 },
 }
 
 impl KernelParameterKind {
     const fn size(self) -> u16 {
-        8
+        match self {
+            Self::GlobalPointer64 | Self::Scalar64 => 8,
+            Self::GridConstant { size, .. } => size,
+        }
+    }
+
+    const fn alignment(self) -> u16 {
+        match self {
+            Self::GlobalPointer64 | Self::Scalar64 => 8,
+            Self::GridConstant { alignment, .. } => alignment,
+        }
     }
 
     const fn cuda_parameter_space(self) -> u32 {
         match self {
             Self::GlobalPointer64 => 5,
-            Self::Scalar64 => 0,
+            Self::Scalar64 | Self::GridConstant { .. } => 0,
         }
     }
 }
@@ -203,17 +218,16 @@ fn add_execution_manifest(
     Ok(output)
 }
 
-/// Recover the exact direct-launch ABI that the pinned export profile writes
-/// on each kernel. Backend B currently flattens every Rust slice into a
-/// `(pointer, i64)` pair and every remaining scalar into `i64`; accepting any
-/// other type here would require a corresponding host-launch ABI decision.
+/// Read the expected launch argument sizes and alignments from exported MLIR.
+///
+/// A Rust slice uses two arguments: pointer, then `i64` length. This profile also
+/// accepts `i64` scalars. A grid-constant reference carries the value's bytes at
+/// its Rust alignment; MLIR represents its address as an opaque pointer.
 fn expected_kernel_abis(
     rendered_mlir: &str,
     expected_kernels: &[String],
 ) -> Result<ExpectedKernelAbis, String> {
-    const PREFIX: &str = "\"func.func\"() <{function_type = (";
-    const RETURN_AND_NAME: &str = ") -> (), sym_name = \"";
-
+    const PREFIX: &str = "\"func.func\"() <{";
     let mut abis = BTreeMap::new();
     for kernel in expected_kernels {
         if kernel.contains(['"', '\\']) {
@@ -222,18 +236,13 @@ fn expected_kernel_abis(
         if abis.contains_key(kernel) {
             return Err(format!("duplicate expected kernel {kernel:?}"));
         }
-        let name_marker = format!("{RETURN_AND_NAME}{kernel}\"");
-        // The generic printer may append whitespace after the region opener;
-        // match the stable function/name portion instead of depending on it.
-        let mut signatures = rendered_mlir
+        let name_marker = format!("sym_name = \"{kernel}\"");
+        let signatures = rendered_mlir
             .lines()
             .filter_map(|line| {
-                let signature = line.trim().strip_prefix(PREFIX)?;
-                let end = signature.find(&name_marker)?;
-                signature[end + name_marker.len()..]
-                    .trim_start()
-                    .starts_with("}> ({")
-                    .then_some(&signature[..end])
+                let properties = line.trim().strip_prefix(PREFIX)?;
+                let (properties, _) = properties.split_once("}> ({")?;
+                properties.contains(&name_marker).then_some(properties)
             })
             .collect::<Vec<_>>();
         if signatures.len() != 1 {
@@ -242,24 +251,170 @@ fn expected_kernel_abis(
                 signatures.len()
             ));
         }
-        let signature = signatures.pop().expect("length checked");
-        let parameters = if signature.trim().is_empty() {
-            Vec::new()
-        } else {
-            signature
-                .split(',')
-                .map(|parameter| match parameter.trim() {
-                    "!llvm.ptr" => Ok(KernelParameterKind::GlobalPointer64),
-                    "i64" => Ok(KernelParameterKind::Scalar64),
-                    other => Err(format!(
-                        "kernel {kernel:?} has unsupported flattened parameter type {other:?}; only !llvm.ptr and i64 have a pinned direct-launch ABI"
-                    )),
-                })
-                .collect::<Result<Vec<_>, _>>()?
-        };
+        let properties = parse_abi_dictionary(signatures[0])?;
+        let quoted_name = format!("\"{kernel}\"");
+        if properties.get("sym_name") != Some(&quoted_name.as_str()) {
+            return Err(format!("kernel {kernel:?} has an ambiguous symbol name"));
+        }
+        for property in properties.keys() {
+            if !matches!(*property, "sym_name" | "function_type" | "arg_attrs") {
+                return Err(format!(
+                    "kernel {kernel:?} has unsupported function property {property:?}"
+                ));
+            }
+        }
+        let signature = properties
+            .get("function_type")
+            .and_then(|value| value.strip_prefix('(')?.strip_suffix(") -> ()"))
+            .ok_or_else(|| format!("kernel {kernel:?} has an unsupported function type"))?;
+        let attributes = properties
+            .get("arg_attrs")
+            .map(|value| {
+                let entries = value
+                    .strip_prefix('[')
+                    .and_then(|value| value.strip_suffix(']'))
+                    .ok_or_else(|| format!("kernel {kernel:?} arg_attrs is not an array"))?;
+                split_abi_items(entries)
+            })
+            .transpose()?;
+        let types = split_abi_items(signature)?;
+        if let Some(attributes) = &attributes
+            && attributes.len() != types.len()
+        {
+            return Err(format!(
+                "kernel {kernel:?} has {} argument attributes for {} parameters",
+                attributes.len(),
+                types.len()
+            ));
+        }
+        let parameters = types
+            .iter()
+            .enumerate()
+            .map(|(ordinal, parameter)| {
+                let attributes = attributes.as_ref().map(|items| items[ordinal]);
+                parse_parameter_abi(parameter, attributes)
+                    .map_err(|reason| format!("kernel {kernel:?} parameter {ordinal}: {reason}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
         abis.insert(kernel.clone(), parameters);
     }
     Ok(abis)
+}
+
+fn parse_parameter_abi(
+    parameter: &str,
+    attributes: Option<&str>,
+) -> Result<KernelParameterKind, String> {
+    let attributes = attributes
+        .map(|value| {
+            let entries = value
+                .strip_prefix('{')
+                .and_then(|value| value.strip_suffix('}'))
+                .ok_or_else(|| "argument attributes must be a dictionary".to_owned())?;
+            parse_abi_dictionary(entries)
+        })
+        .transpose()?
+        .unwrap_or_default();
+    if !attributes.is_empty() {
+        if parameter != "!llvm.ptr"
+            || attributes.len() != 3
+            || attributes.get("nvvm.grid_constant") != Some(&"unit")
+        {
+            return Err("unsupported argument attributes; expected an aligned grid-constant by-value pointer".to_owned());
+        }
+        let size = attributes
+            .get("llvm.byval")
+            .and_then(|value| value.strip_prefix("!llvm.array<")?.strip_suffix(" x i8>"))
+            .and_then(|value| value.parse::<u16>().ok())
+            .filter(|size| (1..=0x3fff).contains(size))
+            .ok_or_else(|| {
+                "llvm.byval must be a nonempty byte array fitting the CUDA parameter size field"
+                    .to_owned()
+            })?;
+        let alignment = attributes
+            .get("llvm.align")
+            .and_then(|value| value.strip_suffix(" : i64"))
+            .and_then(|value| value.parse::<u16>().ok())
+            .filter(|alignment| alignment.is_power_of_two())
+            .ok_or_else(|| {
+                "llvm.align must be a nonzero power-of-two i64 fitting the CUDA parameter block"
+                    .to_owned()
+            })?;
+        return Ok(KernelParameterKind::GridConstant { size, alignment });
+    }
+    match parameter {
+        "!llvm.ptr" => Ok(KernelParameterKind::GlobalPointer64),
+        "i64" => Ok(KernelParameterKind::Scalar64),
+        other => Err(format!(
+            "unsupported flattened parameter type {other:?}; only !llvm.ptr and i64 have a pinned direct-launch ABI"
+        )),
+    }
+}
+
+fn parse_abi_dictionary(input: &str) -> Result<BTreeMap<&str, &str>, String> {
+    let mut result = BTreeMap::new();
+    for item in split_abi_items(input)? {
+        let (name, value) = if item == "nvvm.grid_constant" {
+            (item, "unit")
+        } else {
+            item.split_once(" = ")
+                .ok_or_else(|| format!("malformed ABI dictionary entry {item:?}"))?
+        };
+        if result.insert(name, value).is_some() {
+            return Err(format!("duplicate ABI dictionary entry {name:?}"));
+        }
+    }
+    Ok(result)
+}
+
+/// Split argument lists at commas, keeping nested types and attributes intact.
+fn split_abi_items(input: &str) -> Result<Vec<&str>, String> {
+    if input.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut items = Vec::new();
+    let mut brackets = Vec::new();
+    let mut quoted = false;
+    let mut escaped = false;
+    let mut start = 0;
+    for (offset, byte) in input.bytes().enumerate() {
+        if quoted {
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == b'"' {
+                quoted = false;
+            }
+            continue;
+        }
+        match byte {
+            b'"' => quoted = true,
+            b'(' => brackets.push(b')'),
+            b'[' => brackets.push(b']'),
+            b'{' => brackets.push(b'}'),
+            b'<' => brackets.push(b'>'),
+            b'>' if offset > 0 && input.as_bytes()[offset - 1] == b'-' => {}
+            b')' | b']' | b'}' | b'>' => {
+                if brackets.pop() != Some(byte) {
+                    return Err("unbalanced delimiters in kernel ABI".to_owned());
+                }
+            }
+            b',' if brackets.is_empty() => {
+                items.push(input[start..offset].trim());
+                start = offset + 1;
+            }
+            _ => {}
+        }
+    }
+    if quoted || !brackets.is_empty() {
+        return Err("unterminated kernel ABI property".to_owned());
+    }
+    items.push(input[start..].trim());
+    if items.contains(&"") {
+        return Err("empty entry in kernel ABI".to_owned());
+    }
+    Ok(items)
 }
 
 fn extract_kernels_binary(object_bytes: &[u8]) -> Result<Vec<u8>, String> {
@@ -552,10 +707,11 @@ fn validate_cuda_cubin(
     Ok(())
 }
 
-/// Validate the post-ptxas direct-launch parameter layout recorded in CUDA's
-/// per-kernel `.nv.info` section. These record tags and bit fields are part of
-/// the fingerprint-pinned CUTLASS 4.7 / CUDA 13.x output contract; unknown or
-/// malformed records are rejected instead of being guessed through.
+/// Check each cubin's launch argument layout against the exported MLIR.
+///
+/// CUDA records parameter sizes and offsets in each kernel's `.nv.info` section.
+/// We support the record format emitted by the pinned CUTLASS 4.7 / CUDA 13.x
+/// toolchain and reject unknown or malformed records.
 fn validate_kernel_parameter_abi(
     kernel: &str,
     section: &[u8],
@@ -666,6 +822,11 @@ fn validate_kernel_parameter_abi(
     for (index, expected_kind) in expected.iter().copied().enumerate() {
         let ordinal = u16::try_from(index)
             .map_err(|_| format!("kernel {kernel:?} has too many parameters"))?;
+        let alignment_mask = expected_kind.alignment() - 1;
+        expected_offset = expected_offset
+            .checked_add(alignment_mask)
+            .map(|offset| offset & !alignment_mask)
+            .ok_or_else(|| format!("kernel {kernel:?} parameter alignment overflows"))?;
         let actual = parameters
             .get(&ordinal)
             .ok_or_else(|| format!("kernel {kernel:?} is missing parameter ordinal {ordinal}"))?;
@@ -876,19 +1037,27 @@ mod tests {
 
     fn parameter_info(parameters: &[KernelParameterKind]) -> Vec<u8> {
         let mut info = Vec::new();
+        let mut offset = 0_u16;
+        let mut offsets = Vec::new();
+        for parameter in parameters {
+            let mask = parameter.alignment() - 1;
+            offset = (offset + mask) & !mask;
+            offsets.push(offset);
+            offset += parameter.size();
+        }
         for (ordinal, parameter) in parameters.iter().copied().enumerate().rev() {
             info.extend_from_slice(&[4, 0x17]);
             info.extend_from_slice(&12_u16.to_le_bytes());
             info.extend_from_slice(&0_u32.to_le_bytes());
             info.extend_from_slice(&(ordinal as u16).to_le_bytes());
-            info.extend_from_slice(&((ordinal * 8) as u16).to_le_bytes());
+            info.extend_from_slice(&offsets[ordinal].to_le_bytes());
             let flags = (u32::from(parameter.size()) << 18)
                 | (0x1f << 12)
                 | (parameter.cuda_parameter_space() << 8);
             info.extend_from_slice(&flags.to_le_bytes());
         }
         info.extend_from_slice(&[3, 0x19]);
-        info.extend_from_slice(&((parameters.len() * 8) as u16).to_le_bytes());
+        info.extend_from_slice(&offset.to_le_bytes());
         info
     }
 

@@ -487,10 +487,10 @@ mod tests {
                 Some("v1:i0763"),
             );
             let mma = Tcgen05MmaOp::new(op);
-            mma.set_attr_nvvm_tcgen05_mma_form(&mut ctx, Tcgen05MmaFormAttr::Shared);
-            mma.set_attr_nvvm_tcgen05_mma_kind(&mut ctx, Tcgen05MmaKindAttr::F16);
-            mma.set_attr_nvvm_tcgen05_mma_cta_group(&mut ctx, Tcgen05MmaCtaGroupAttr::Cg2);
-            mma.set_attr_nvvm_tcgen05_mma_collector_a(&mut ctx, collector);
+            mma.set_attr_nvvm_tcgen05_mma_form(&ctx, Tcgen05MmaFormAttr::Shared);
+            mma.set_attr_nvvm_tcgen05_mma_kind(&ctx, Tcgen05MmaKindAttr::F16);
+            mma.set_attr_nvvm_tcgen05_mma_cta_group(&ctx, Tcgen05MmaCtaGroupAttr::Cg2);
+            mma.set_attr_nvvm_tcgen05_mma_collector_a(&ctx, collector);
             first.get_or_insert(op);
         }
         append::<Tcgen05CommitMulticastCg2Op>(
@@ -565,16 +565,16 @@ mod tests {
 
     #[test]
     fn unsupported_mma_forms_fail_instead_of_losing_their_selectors() {
-        let (mut ctx, module, first) = fixture();
+        let (ctx, module, first) = fixture();
         let mma = Tcgen05MmaOp::new(first);
-        mma.set_attr_nvvm_tcgen05_mma_kind(&mut ctx, Tcgen05MmaKindAttr::Tf32);
+        mma.set_attr_nvvm_tcgen05_mma_kind(&ctx, Tcgen05MmaKindAttr::Tf32);
         let error = translate(&ctx, &module).unwrap_err();
         assert!(
             error.contains("shared-A FP16 CTA-group-2 MMA only"),
             "{error}"
         );
-        mma.set_attr_nvvm_tcgen05_mma_kind(&mut ctx, Tcgen05MmaKindAttr::F16);
-        mma.set_attr_nvvm_tcgen05_mma_cta_group(&mut ctx, Tcgen05MmaCtaGroupAttr::Cg1);
+        mma.set_attr_nvvm_tcgen05_mma_kind(&ctx, Tcgen05MmaKindAttr::F16);
+        mma.set_attr_nvvm_tcgen05_mma_cta_group(&ctx, Tcgen05MmaCtaGroupAttr::Cg1);
         let error = translate(&ctx, &module).unwrap_err();
         assert!(
             error.contains("shared-A FP16 CTA-group-2 MMA only"),

@@ -20,7 +20,8 @@
 
 #![feature(f16)]
 
-use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
+use cuda_core::simt::LaunchConfig;
+use cuda_core::{CudaContext, DeviceBuffer};
 use cuda_device::{DisjointSlice, cuda_module, kernel, thread};
 
 /// Deliberately not divisible by the tiles: f32 tail of 3, f16 tail of 5.

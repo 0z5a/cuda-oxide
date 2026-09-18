@@ -196,14 +196,11 @@ pub fn prepare_mir_module(
     )?;
 
     if has_high_level_cute_operations {
-        // A reborrow of a local CuTe carrier binding (`&mut tensor`) imports
-        // as a pointer-kind-only `mir.cast` on the alloca slot pointer. That
-        // cast is a non-promotable use for mem2reg, but ghost CuTe values are
-        // forbidden from living in memory at all, so the kind refinement
-        // carries no ABI meaning for them. Once the first mem2reg pass has
-        // dissolved the pointer slots, the cast's remaining uses are plain
-        // memory addresses; fold it back onto the slot pointer so the second
-        // pass can dissolve the ghost slot itself.
+        // Borrowing a local CuTe value (`&mut tensor`) can leave a `mir.cast`
+        // on its stack-slot pointer. The cast changes only the pointer kind,
+        // but prevents mem2reg from removing the slot. CuTe ghost values must
+        // stay in SSA, so remove these casts when every use is a load or store
+        // address. The next mem2reg pass can then remove the CuTe slot.
         fold_ghost_slot_kind_only_casts(ctx, module);
         verify_operation(ctx, module, "module post-ghost-slot-kind-cast-folding")?;
 
@@ -335,10 +332,10 @@ fn fold_ghost_slot_kind_only_casts(ctx: &mut Context, root: Ptr<Operation>) {
             for block in region.deref(ctx).iter(ctx) {
                 for child in block.deref(ctx).iter(ctx) {
                     pending.push(child);
-                    if let Some(cast) = Operation::get_op::<MirCastOp>(child, ctx) {
-                        if is_ghost_slot_kind_only_cast(ctx, &cast) {
-                            foldable.push(child);
-                        }
+                    if let Some(cast) = Operation::get_op::<MirCastOp>(child, ctx)
+                        && is_ghost_slot_kind_only_cast(ctx, &cast)
+                    {
+                        foldable.push(child);
                     }
                 }
             }

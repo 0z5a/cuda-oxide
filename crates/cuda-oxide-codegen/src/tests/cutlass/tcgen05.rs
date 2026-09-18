@@ -120,10 +120,10 @@ fn cutlass_tcgen05_pack_compiles() {
             Some("v1:i0763"),
         );
         let mma = Tcgen05MmaOp::new(op);
-        mma.set_attr_nvvm_tcgen05_mma_form(&mut ctx, Tcgen05MmaFormAttr::Shared);
-        mma.set_attr_nvvm_tcgen05_mma_kind(&mut ctx, Tcgen05MmaKindAttr::F16);
-        mma.set_attr_nvvm_tcgen05_mma_cta_group(&mut ctx, Tcgen05MmaCtaGroupAttr::Cg2);
-        mma.set_attr_nvvm_tcgen05_mma_collector_a(&mut ctx, collector);
+        mma.set_attr_nvvm_tcgen05_mma_form(&ctx, Tcgen05MmaFormAttr::Shared);
+        mma.set_attr_nvvm_tcgen05_mma_kind(&ctx, Tcgen05MmaKindAttr::F16);
+        mma.set_attr_nvvm_tcgen05_mma_cta_group(&ctx, Tcgen05MmaCtaGroupAttr::Cg2);
+        mma.set_attr_nvvm_tcgen05_mma_collector_a(&ctx, collector);
     }
     append::<Tcgen05CommitMulticastCg2Op>(
         &mut ctx,
@@ -236,7 +236,7 @@ fn cutlass_cluster_tma_pack_compiles() {
         (ClusterBarrierModeAttr::Wait, "v1:i0281"),
     ] {
         let op = append::<ClusterBarrierOp>(&mut ctx, block, vec![], vec![], Some(marker));
-        ClusterBarrierOp::new(op).set_attr_nvvm_cluster_barrier_mode(&mut ctx, mode);
+        ClusterBarrierOp::new(op).set_attr_nvvm_cluster_barrier_mode(&ctx, mode);
     }
     append::<MbarrierArriveExpectTxClusterOp>(
         &mut ctx,
@@ -310,8 +310,7 @@ fn cutlass_cluster_tma_pack_compiles() {
         vec![u64.into()],
         None,
     );
-    MirCastOp::new(remote_address)
-        .set_attr_cast_kind(&mut ctx, MirCastKindAttr::PointerExposeAddress);
+    MirCastOp::new(remote_address).set_attr_cast_kind(&ctx, MirCastKindAttr::PointerExposeAddress);
     let address = remote_address.deref(&ctx).get_result(0);
     append::<MbarrierArriveClusterOp>(&mut ctx, block, vec![address], vec![], Some("v1:i0308"));
     append::<MirReturnOp>(&mut ctx, block, vec![], vec![], None);

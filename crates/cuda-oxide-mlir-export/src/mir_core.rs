@@ -10,7 +10,9 @@
 //! signed or unsigned `arith` operation before that information disappears.
 
 use dialect_mir::{
-    attributes::{MirCastKindAttr, MirFP16Attr, MirPointerKindAuthorityAttr},
+    attributes::{
+        MirCastKindAttr, MirFP16Attr, MirPointerKindAuthorityAttr, ReferenceParamValidityAttr,
+    },
     ops::{
         MirAddOp, MirBitAndOp, MirBitOrOp, MirBitXorOp, MirCastOp, MirCondBranchOp, MirConstantOp,
         MirDivOp, MirEqOp, MirFloatConstantOp, MirFuncOp, MirGeOp, MirGotoOp, MirGtOp, MirLeOp,
@@ -45,6 +47,9 @@ pub fn register_mir_core_pack(registry: &mut TranslationRegistry) -> Result<(), 
     // Rust-boundary provenance metadata consumed by the dialect-mir verifier;
     // like the cast kind, it has no MLIR counterpart and is dropped at export.
     registry.register_attribute::<MirPointerKindAuthorityAttr>(DropAttribute)?;
+    // These optional optimization hints use Rust argument indices. Drop them
+    // until they can be remapped to the launch arguments after slice flattening.
+    registry.register_attribute::<ReferenceParamValidityAttr>(DropAttribute)?;
 
     registry.register_operation::<MirFuncOp>(FunctionTranslation)?;
     registry.register_operation::<MirReturnOp>(RenameOperation("func.return"))?;
@@ -125,6 +130,7 @@ impl OperationTranslation for FunctionTranslation {
         let mut target = renamed("func.func", input)?;
         move_property(&mut target, "sym_name", "sym_name")?;
         move_property(&mut target, "mir_func_type", "function_type")?;
+        let grid_constants = crate::grid_constant::take_parameters(ctx, source, &mut target)?;
         lower_alwaysinline_contract(&mut target)?;
         if let Some(marker) = target.attributes.remove("gpu_kernel") {
             match marker {
@@ -137,7 +143,7 @@ impl OperationTranslation for FunctionTranslation {
                         .insert("gpu.kernel".into(), MlirAttribute::Unit);
                     move_exact_block_contract(&mut target)?;
                     move_cluster_contract(&mut target)?;
-                    flatten_kernel_slice_abi(ctx, source, &mut target, session)?;
+                    flatten_kernel_slice_abi(ctx, source, &mut target, session, &grid_constants)?;
                 }
                 other => {
                     return Err(format!(
@@ -264,14 +270,22 @@ fn take_positive_i32_attribute(
     Ok(Some(value))
 }
 
-/// Match CUDA Oxide's existing kernel launch ABI: a Rust slice is passed as
-/// two driver arguments, pointer then length. Rebuild the source aggregate at
-/// entry so the already-translated body does not need any rewriting.
+/// Pass each Rust slice as two launch arguments: pointer, then length.
+/// Rebuild the slice at kernel entry so the body can keep using its original value.
+///
+/// ```text
+/// Rust arguments:   slice,        descriptor
+/// Launch arguments: pointer, len, descriptor
+/// Argument index:   0        1    2
+/// ```
+///
+/// Grid-constant attributes must follow the descriptor to its new argument index.
 fn flatten_kernel_slice_abi(
     ctx: &Context,
     source: Ptr<Operation>,
     target: &mut MlirOperation,
     session: &mut TranslationSession<'_>,
+    grid_constants: &std::collections::BTreeMap<usize, crate::grid_constant::Parameter>,
 ) -> Result<(), String> {
     let source_function =
         MirFuncOp::wrap(ctx, source).ok_or_else(|| "expected mir.func".to_owned())?;
@@ -319,11 +333,13 @@ fn flatten_kernel_slice_abi(
     let mut flattened_types = Vec::new();
     let mut flattened_arguments = Vec::new();
     let mut prologue = Vec::new();
+    let mut argument_attributes = Vec::new();
 
-    for ((source_type, target_type), original_argument) in source_inputs
+    for (index, ((source_type, target_type), original_argument)) in source_inputs
         .into_iter()
         .zip(target_inputs.iter())
         .zip(entry.arguments.iter())
+        .enumerate()
     {
         let source_type_ref = source_type.deref(ctx);
         let is_plain_slice = source_type_ref.downcast_ref::<MirSliceType>().is_some();
@@ -339,6 +355,10 @@ fn flatten_kernel_slice_abi(
         if !is_plain_slice && disjoint_slice.is_none() {
             flattened_types.push(target_type.clone());
             flattened_arguments.push(original_argument.clone());
+            argument_attributes.push(match grid_constants.get(&index) {
+                Some(parameter) => parameter.attributes()?,
+                None => MlirAttribute::Dictionary(Default::default()),
+            });
             continue;
         }
 
@@ -352,6 +372,10 @@ fn flatten_kernel_slice_abi(
         let pointer_id = session.fresh_value();
         let length_id = session.fresh_value();
         flattened_types.extend([pointer_type.clone(), length_type.clone()]);
+        argument_attributes.extend([
+            MlirAttribute::Dictionary(Default::default()),
+            MlirAttribute::Dictionary(Default::default()),
+        ]);
         flattened_arguments.extend([
             MlirBlockArgument {
                 id: pointer_id,
@@ -428,6 +452,17 @@ fn flatten_kernel_slice_abi(
     entry.arguments = flattened_arguments;
     prologue.append(&mut entry.operations);
     entry.operations = prologue;
+    if !grid_constants.is_empty() {
+        if target.properties.contains_key("arg_attrs")
+            || target.attributes.contains_key("arg_attrs")
+        {
+            return Err("grid-constant kernel already has argument attributes".into());
+        }
+        target.properties.insert(
+            "arg_attrs".into(),
+            MlirAttribute::Array(argument_attributes),
+        );
+    }
     Ok(())
 }
 

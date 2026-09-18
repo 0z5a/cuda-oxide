@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! Tensor-view types kept only while CuTe meaning is useful.
+//! Tensor-view types used to check and lower CuTe operations.
 //!
 //! A tensor view is a compiler description, not a runtime struct:
 //!
@@ -14,20 +14,19 @@
 //! ```
 //!
 //! A selected backend consumes the description while lowering to native
-//! operations or MLIR. No backend may assign this ghost type an ABI or leave
-//! it in a kernel signature.
+//! operations or MLIR. A view has no runtime storage and must be removed
+//! before the backend produces a kernel signature.
 //!
-//! Backend-neutral verification reads these values after common MIR
-//! preparation has exposed the semantic story:
+//! After MIR preparation, the verifier follows each view through its uses:
 //!
 //! ```text
 //! make -> zipped_divide -> slice -> load/store
 //! ```
 //!
-//! At that seam, a view cannot sit inside a pointer or aggregate, cross a
-//! block edge, or appear in a function signature. Ordinary scalar carriers
-//! may remain in closed compiler-owned local cells or cross CFG edges; the
-//! semantic verifier follows those carriers before backend selection.
+//! At this stage, a view cannot be stored inside a pointer or aggregate,
+//! passed between blocks, or appear in a function signature. Ordinary scalar
+//! values may remain in compiler-owned local storage whose address does not
+//! escape, or pass between blocks. The verifier follows those values too.
 
 use dialect_mir::types::{MirArrayType, MirFP16Type, MirStructType, MirTupleType};
 use pliron::builtin::types::{FP32Type, IntegerType};
@@ -47,9 +46,8 @@ use crate::attributes::{
 
 /// Physical scalar registers inside one ordinary MIR aggregate.
 ///
-/// Semantic MMA operations keep their runtime values in the same Rust-shaped
-/// aggregates used today. This small summary lets their verifiers check those
-/// carriers without turning them into new loop-carried ghost values.
+/// MMA operations keep runtime values in ordinary Rust arrays and structs.
+/// This count lets the verifier check their register requirements.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct MmaCarrierShape {
     pub u32_registers: u64,
@@ -101,7 +99,7 @@ impl MmaCarrierShape {
 ///
 /// Arrays, tuples, and structs are walked recursively. Empty marker structs
 /// such as `PhantomData<Role>` contribute nothing. Any other scalar or
-/// aggregate kind fails closed with `None`.
+/// aggregate kind returns `None`.
 #[must_use]
 pub fn mma_carrier_shape(ctx: &Context, ty: TypeHandle) -> Option<MmaCarrierShape> {
     let ty = ty.deref(ctx);

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 """Check FP16 CuTe GEMM tails, persistent tiles, and five-stage pipeline reuse.
 
@@ -84,7 +84,7 @@ def validate(binary, directory, timeout, sanitizer):
         # A failed or malformed invocation must not reuse an older result.
         result_path.unlink(missing_ok=True)
         command = [
-            str(binary), "--mnk", shape, *extra, "--warmup", "1", "--iters", "2",
+            str(binary), "--rust-only", "--mnk", shape, *extra, "--warmup", "1", "--iters", "2",
             "--graph-launches", "2", "--json", str(result_path),
         ]
         entry = check(name, command)
@@ -112,7 +112,7 @@ def validate(binary, directory, timeout, sanitizer):
             if tool == "memcheck":
                 command += ["--check-tensor-ops", "yes"]
             command += [
-                str(binary), "--mnk", "512,712,392", "--has-bias", "--clusters", "1",
+                str(binary), "--rust-only", "--mnk", "512,712,392", "--has-bias", "--clusters", "1",
                 "--warmup", "0", "--iters", "1", "--graph-launches", "1",
             ]
             entry = check(tool, command)

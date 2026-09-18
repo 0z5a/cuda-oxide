@@ -3,31 +3,26 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! Recognition of `cute-rs` device-library calls.
+//! Translate `cute-rs` calls into CuTe operations.
 //!
-//! ALL cute-specific importer code lives in this module; the shared
-//! translator contains only the one dispatch line in `translate_call`.
-//! Mirrors the `terminator/intrinsics/` pattern.
+//! CuTe-specific call handling lives here. The shared translator calls this
+//! module from `translate_call`, as it does for CUDA intrinsics.
 //!
-//! Recognition is STRUCTURAL, not string-based: we rebuild the callee's
-//! canonical definition path by walking the DefId parent chain (the
-//! cuda-intrinsics mechanism) and compare it against [`CUTE_FNS`]. This is
-//! immune to the two failure modes of name matching:
+//! Calls are matched by their definition path, found by walking the `DefId`
+//! parent chain. This keeps matching stable when a function is re-exported or
+//! a trait method is printed with a different name:
 //!
-//! - rustc's name printer prefers public re-export paths
-//!   (`cute_rs::load_tile`) over definition paths
-//!   (`cute_rs::tile::load_tile`), and re-exports are API surface that
-//!   moves;
-//! - trait-method paths print as `<cute_rs::Foo as Trait>::method`, which
-//!   prefix checks miss entirely.
+//! ```text
+//! public name:      cute_rs::load_tile
+//! definition path:  cute_rs::tile::load_tile -> CUTE_FNS entry
+//! ```
 //!
-//! Contract: a recognized call is NEVER translated body-by-body. Static
-//! parameters are read from the monomorphized substs after validating the
-//! per-function [`SubstKind`] schema. Explicit source-abstraction modules
-//! contain ordinary device-safe Rust and fall through to body translation;
-//! LLVM then erases their `#[inline(always)]` boundaries. Every other unknown
-//! `cute_rs` call is a hard error (body translation of a recognition stub
-//! would scalarize the layout: the raising trap).
+//! A recognized call becomes a CuTe operation; its Rust body is not translated.
+//! The importer checks its specialized generic arguments against [`SubstKind`]
+//! before reading static configuration. Ordinary Rust helpers in explicitly
+//! allowed modules use normal body translation and are inlined by LLVM.
+//! Any other unknown `cute_rs` call is an error: translating a compiler stub's
+//! body could turn layout operations into scalar code and lose their meaning.
 
 pub(crate) mod block_scaled;
 pub(crate) mod block_scaled_emit;
@@ -130,18 +125,15 @@ pub(crate) enum SubstKind {
     Lifetime,
 }
 
-/// One recognized function: its canonical DEFINITION path (what the DefId
-/// parent walk reconstructs; re-exports never appear here) and the shape
-/// its generics must have.
+/// A recognized function's definition path and expected generic arguments.
+/// Re-export paths do not appear here.
 pub(crate) struct CuteFnSpec {
     pub canonical: &'static str,
     pub func: CuteFn,
     pub schema: &'static [SubstKind],
 }
 
-/// The recognition table. Grows by one entry per recognized function; when
-/// the op set stabilizes this graduates to catalog generation (the
-/// cuda-intrinsics-gen model) and these entries become generated.
+/// One entry per recognized function, including its generic argument schema.
 pub(crate) const CUTE_FNS: &[CuteFnSpec] = &[
     CuteFnSpec {
         canonical: "cute_rs::sm100::__compiler::sm100_tma_store",

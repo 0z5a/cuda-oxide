@@ -14,4 +14,4 @@ publish = false
 cute-rs = { path = "../../cute-rs" }
 cuda-device = { path = "../../../crates/cuda-device" }
 cuda-host = { path = "../../../crates/cuda-host" }
-cuda-core = { path = "../../../crates/cuda-core" }
+cuda-core = { version = "0.3.1", features = ["f16"] }

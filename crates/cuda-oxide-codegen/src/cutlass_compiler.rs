@@ -5,12 +5,11 @@
 
 //! Runtime-loaded bindings for the CUTLASS 4.7 compiler C API.
 //!
-//! This module intentionally exposes one narrow operation: compile textual
-//! `PreCompiledMlir` through a pinned CuTe pipeline to the C API's
-//! `ObjectArtifact`. Despite containing device code, that artifact is a host
-//! ELF object, not a standalone CUDA image. The
-//! official API owns all compiler and artifact handles, so the wrappers below
-//! release them through the matching C destructors.
+//! Compile textual `PreCompiledMlir` through a pinned CuTe pipeline to the
+//! C API's `ObjectArtifact`. The result is a host ELF object containing the
+//! CUDA image; the backend extracts that image before the driver can load it.
+//! These wrappers release compiler and artifact handles with the matching
+//! C API destructors.
 
 use libloading::{Library, Symbol};
 use sha2::{Digest, Sha256};

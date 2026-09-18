@@ -19,7 +19,8 @@
 
 #![feature(f16)]
 
-use cuda_core::{CudaContext, DeviceBuffer, LaunchConfig};
+use cuda_core::simt::LaunchConfig;
+use cuda_core::{CudaContext, DeviceBuffer};
 use cuda_device::{DisjointSlice, cuda_module, kernel, thread};
 use cute_rs::{BlockScaledTensor, E2M1, KMajor, Mkl, Nkl, Sm1xxBlockScaleKMajor, UE8M0};
 

@@ -1,9 +1,7 @@
 # CuTe-style GPU kernels in Rust
 
-`cuteir` lets a Rust kernel describe GPU data by its meaning, not only by its
-address.
-
-The two basic ideas are small:
+`cuteir` lets a Rust kernel describe GPU data with typed tensors and layouts.
+It starts with two ideas:
 
 - a **Tensor** is storage plus a layout;
 - a **Layout** says where a logical coordinate lives in that storage.
@@ -40,12 +38,14 @@ Tensor → zipped_divide → slice → copy / add / matrix multiply
              preparation + verification
                          │
                          ▼
-             selected backend continuation
+                code generation
 ```
 
-The whole-module verifier checks that tensor provenance, scheduler and
-pipeline state, TMA transactions, shared-memory MMA, and epilogue operations
-form a complete semantic story. It does not choose or execute a backend.
+The verifier checks where tensors come from, how scheduler and pipeline state
+flows between operations, and whether TMA, MMA, and epilogue operations agree
+on layouts and buffer ownership. Both backends use these checks before
+lowering CuTe operations. Dynamic phases, lane participation, and pointer
+lifetimes remain the caller's responsibility.
 
 ## What lives here
 
@@ -85,13 +85,10 @@ The elementwise example uses ordinary `f32` and `f16` operations. The two FP4
 examples use Blackwell instructions and should be built for `sm_120a`; their
 own READMEs give the exact device and shape requirements.
 
-The first three programs check every GPU output bit pattern against a deterministic host
-result before reporting success. The FP16 example checks every output
-against a numerical oracle; its README includes the SM100 build and validation commands.
-Backend-specific artifact and code-shape
-checks live with the backend implementation rather than in this shared layer.
+The first three programs compare every GPU output bit pattern with a
+fixed host result. The FP16 example checks outputs numerically; its README
+includes the SM100 build and validation commands. Tests for generated code
+and artifacts live with each backend.
 
-On the translation branch, the [official CUTLASS backend](docs/translation.md)
-maps these semantic operations directly to the CUTLASS 4.7 MLIR profile and
-embeds the compiler-produced cubin. It does not pass through native CuTe
-expansion.
+The [official CUTLASS backend](docs/translation.md) maps CuTe operations
+directly to the CUTLASS 4.7 MLIR profile and embeds the resulting cubin.

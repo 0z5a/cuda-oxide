@@ -704,8 +704,13 @@ impl OperationTranslation for AssertTranslation {
         _session: &mut TranslationSession<'_>,
     ) -> Result<Vec<MlirOperation>, String> {
         ensure_empty_attributes("mir.assert", &input)?;
-        if input.operands.is_empty() || input.successors.len() != 1 {
-            return Err("mir.assert expected a condition and one success block".into());
+        if input.operands.len() != 1
+            || input.operands[0].ty != MlirType::Integer(1)
+            || !input.successors.is_empty()
+            || !input.results.is_empty()
+            || !input.regions.is_empty()
+        {
+            return Err("mir.assert expected one i1 condition and no successors or results".into());
         }
         let mut assertion = MlirOperation::new("cf.assert")?;
         assertion.operands.push(input.operands[0].clone());
@@ -715,11 +720,9 @@ impl OperationTranslation for AssertTranslation {
         );
         assertion.location = input.location.clone();
 
-        let mut branch = MlirOperation::new("cf.br")?;
-        branch.operands.extend_from_slice(&input.operands[1..]);
-        branch.successors = input.successors;
-        branch.location = input.location;
-        Ok(vec![assertion, branch])
+        // Assertions are effectful checks within a block. Any following MIR
+        // branch is translated separately, so no synthetic branch belongs here.
+        Ok(vec![assertion])
     }
 }
 
@@ -904,7 +907,7 @@ fn source_is_zero_sized(ctx: &Context, source: TypeHandle) -> bool {
     false
 }
 
-fn source_stored_size(ctx: &Context, source: TypeHandle) -> Option<u64> {
+pub(crate) fn source_stored_size(ctx: &Context, source: TypeHandle) -> Option<u64> {
     let source_ref = source.deref(ctx);
     if let Some(integer) = source_ref.downcast_ref::<IntegerType>() {
         return Some(u64::from(integer.width()).div_ceil(8));
@@ -1203,7 +1206,7 @@ mod tests {
     use dialect_mir::{
         attributes::{CompilerResultBundleAttr, FieldIndexAttr},
         ops::{
-            MirAddOp, MirAllocaOp, MirArrayElementAddrOp, MirConstructArrayOp,
+            MirAddOp, MirAllocaOp, MirArrayElementAddrOp, MirAssertOp, MirConstructArrayOp,
             MirExtractArrayElementOp, MirExtractFieldOp, MirFieldAddrOp, MirFuncOp, MirLoadOp,
             MirReturnOp, MirStoreOp,
         },
@@ -1242,6 +1245,47 @@ mod tests {
     }
 
     #[test]
+    fn assertion_remains_an_effectful_check_before_following_operations() {
+        let mut ctx = Context::new();
+        dialect_mir::register(&mut ctx);
+        let module = ModuleOp::new(&mut ctx, Identifier::try_from("assertion").unwrap());
+        let condition = integer(&mut ctx, 1);
+        let word = integer(&mut ctx, 32);
+        let inputs = vec![condition.into(), word.into()];
+        let ty = FunctionType::get(&ctx, inputs.clone(), vec![word.into()]);
+        let function_op = Operation::new(
+            &mut ctx,
+            MirFuncOp::get_concrete_op_info(),
+            vec![],
+            vec![],
+            vec![],
+            1,
+        );
+        let function = MirFuncOp::new(&mut ctx, function_op, TypeAttr::new(ty.into()));
+        function.set_symbol_name(&mut ctx, Identifier::try_from("checked_add").unwrap());
+        module.append_operation(&mut ctx, function_op, 0);
+        let block = BasicBlock::new(&mut ctx, None, inputs);
+        block.insert_at_back(function_op.deref(&ctx).get_region(0), &ctx);
+        let condition = block.deref(&ctx).get_argument(0);
+        let word = block.deref(&ctx).get_argument(1);
+        operation::<MirAssertOp>(&mut ctx, block, vec![], vec![condition]);
+        let result_type = integer(&mut ctx, 32);
+        let sum =
+            operation::<MirAddOp>(&mut ctx, block, vec![result_type.into()], vec![word, word]);
+        let sum = sum.deref(&ctx).get_result(0);
+        operation::<MirReturnOp>(&mut ctx, block, vec![], vec![sum]);
+        let profile = CutlassFullCuteMlir22::new("sm_100a").unwrap();
+        let target = profile.translate_module(&ctx, &module).unwrap();
+        let text = render_mapping_module_without_cutlass_envelope(&target, "assertion");
+        assert_eq!(text.matches("\"cf.assert\"").count(), 1, "{text}");
+        assert!(
+            text.find("\"cf.assert\"").unwrap() < text.find("\"arith.addi\"").unwrap(),
+            "{text}"
+        );
+        assert!(!text.contains("\"cf.br\""), "{text}");
+    }
+
+    #[test]
     fn compiler_result_array_preserves_lane_order_and_empty_arrays() {
         for count in [0, 4, 32] {
             let mut ctx = Context::new();
@@ -1250,7 +1294,7 @@ mod tests {
             let word = integer(&mut ctx, 32);
             let array = MirArrayType::get(&mut ctx, word.into(), count);
             let args = vec![word.into(); count as usize];
-            let ty = FunctionType::get(&mut ctx, args.clone(), vec![array.into()]);
+            let ty = FunctionType::get(&ctx, args.clone(), vec![array.into()]);
             let function_op = Operation::new(
                 &mut ctx,
                 MirFuncOp::get_concrete_op_info(),

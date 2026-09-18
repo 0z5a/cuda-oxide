@@ -5,9 +5,8 @@
 
 //! NVFP4 GEMV mappings for the official CUTLASS full-CuTe MLIR profile.
 //!
-//! The source views are compiler-only values, but the target carriers are
-//! ordinary LLVM aggregates. Keeping the runtime pointer and shape fields in
-//! SSA gives each selection operation a real target dataflow edge:
+//! Source views become LLVM aggregates holding runtime pointers and shapes.
+//! Keeping these fields in SSA preserves the dependencies between operations:
 //!
 //! ```text
 //! tensor_make_2d -> scaled_view_make -> row -> KTile<64>
@@ -19,8 +18,8 @@
 //!                  load_vec -> cvt_fpext -> ordered f32 dot
 //! ```
 //!
-//! This translation consumes the shared semantic operations directly and
-//! manufactures only target operations owned by CUTLASS.
+//! The mapping translates CuTe operations directly into operations accepted
+//! by CUTLASS.
 
 use crate::cute::{TensorViewTypeTranslation, register_cute_elementwise_mappings};
 

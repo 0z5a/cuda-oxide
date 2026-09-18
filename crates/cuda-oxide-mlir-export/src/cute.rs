@@ -3,10 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! The first semantic CuTe mapping slice for the official CUTLASS `cute`
-//! dialect.
+//! Map tensor views and copies to the official CUTLASS `cute` dialect.
 //!
-//! The split is deliberate:
+//! Full tiles use CuTe operations; edge tiles use checked scalar accesses:
 //!
 //! ```text
 //! tensor_make -> zipped_divide -> slice -> full-tile copy
@@ -16,10 +15,9 @@
 //!              ordinary arith + LLVM, using verified producer provenance
 //! ```
 //!
-//! CUTLASS has first-class operations for the view transformations and bulk copy.
-//! It does not have operations carrying the original logical length or the
-//! absolute-index tail-store contract, so inventing similarly named target
-//! operations would lose semantics rather than preserve them.
+//! CUTLASS handles view transformations and bulk copies. Edge stores still
+//! need the original logical length and absolute index, so they map to scalar
+//! arithmetic and LLVM memory operations.
 
 use dialect_cute::{
     attributes::{

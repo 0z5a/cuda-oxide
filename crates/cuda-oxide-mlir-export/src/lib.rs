@@ -5,14 +5,14 @@
 
 //! CUDA Oxide mappings for textual MLIR export.
 //!
-//! The generic exporter answers "how do we build typed, deterministic MLIR
-//! text?" This crate answers "what does this CUDA Oxide operation become for
-//! this exact consumer?"
+//! The generic exporter builds typed MLIR text. This crate maps CUDA Oxide
+//! operations to the types and operations accepted by the pinned CUTLASS compiler.
 
 mod cute;
 mod cute_gemm;
 mod cute_gemv;
 mod cute_sm100;
+mod grid_constant;
 mod mir_core;
 mod mir_memory;
 mod nvvm_cluster;

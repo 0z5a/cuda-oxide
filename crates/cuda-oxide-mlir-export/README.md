@@ -1,9 +1,7 @@
 # CUDA Oxide MLIR export
 
-This crate contains CUDA Oxide's target-specific mappings for
-`pliron-mlir-export`. It is the CUTLASS translation backend. The generic
-crate builds typed, deterministic MLIR text; this crate explains what each
-CUDA Oxide operation means to one pinned MLIR consumer.
+This crate maps CUDA Oxide operations to MLIR accepted by the pinned CUTLASS
+compiler. It uses `pliron-mlir-export` to build and render the MLIR text:
 
 ```text
 pliron-mlir-export                 this crate
@@ -12,10 +10,10 @@ syntax tree + renderer      +     builtin / MIR / NVVM / CuTe mappings
 registry + diagnostics            pinned consumer profiles
 ```
 
-The split is deliberate. The generic crate can translate any Pliron dialect.
-This crate decides what CUDA Oxide operations mean in one exact MLIR consumer.
+The generic crate can translate any Pliron dialect. CUDA-specific mappings
+and compiler-version requirements live here.
 
-The first profile targets the official CUTLASS 4.7 compiler library. CUDA
+The profile targets the official CUTLASS 4.7 compiler library. CUDA
 Oxide installs the exact NVIDIA release archive, verifies both the archive and
 library digests, and loads that versioned library explicitly:
 
@@ -35,12 +33,11 @@ shared high-level Pliron module
  official CUTLASS 4.7 compiler
 ```
 
-The elementwise, NVFP4 GEMV, and block-scaled GEMM mapping packs translate the
-live post-preparation module directly. The pinned library compiles that MLIR to
-a validated cubin, which is embedded and launched through CUDA Oxide's ordinary
-artifact loader. Set `CUDA_OXIDE_MLIR_OUTPUT=<file>` to retain the exact textual
-module for inspection; select `CUDA_OXIDE_DEVICE_BACKEND=cutlass-mlir` to compile
-it.
+The mapping packs translate CuTe operations after shared MIR preparation.
+The pinned library compiles the resulting MLIR, and the backend extracts and
+validates its cubin. CUDA Oxide embeds and launches that cubin through its
+ordinary artifact loader. Set `CUDA_OXIDE_MLIR_OUTPUT=<file>` to keep the MLIR
+text for inspection; select `CUDA_OXIDE_DEVICE_BACKEND=cutlass-mlir` to compile it.
 
 The SM100 primitive pack additionally maps two-CTA FP16 TCGen05 MMA with A
 collector selectors, tensor-memory allocation/load/commit/wait operations,
@@ -50,13 +47,14 @@ example exercises these together. It also preserves fixed cluster dimensions
 in `nvvm.cluster_dim` and the scalar order of compiler-created register arrays.
 Unsupported primitive selectors and intrinsic identities fail at export.
 
-## The first mapping pack
+## Scalar code and control flow
 
-The first pack covers the ordinary scalar code around a CuTe kernel:
+These mappings handle the ordinary scalar code around a CuTe kernel:
 
 ```text
 mir.func / mir.return        → func.func / func.return
 mir.goto / mir.cond_br       → cf.br / cf.cond_br
+mir.assert                  → cf.assert
 mir.constant                 → arith.constant
 mir.add / sub / mul          → arith.add* / sub* / mul*
 mir.div / rem                → signed or unsigned arith operation
@@ -121,6 +119,24 @@ Rust can reorder fields and insert padding. The translator reads the MIR
 layout and rebuilds that exact physical order. It refuses packed or otherwise
 different by-value layouts instead of silently changing an address.
 
+For `#[grid_constant] value: &T`, the host passes `T` by value. Every thread
+borrows the same read-only kernel parameter storage:
+
+```text
+host T -> one by-value launch argument -> device &T shared by the grid
+```
+
+The exporter records the value's size with `llvm.byval`, its Rust alignment
+with `llvm.align`, and shared read-only storage with `nvvm.grid_constant`.
+For a TMA descriptor this means 128 bytes aligned to 64 bytes. Slices expand
+into pointer and length arguments, so these attributes follow the descriptor
+to its new argument index.
+
+The backend checks the cubin's parameter sizes and offsets before saving it.
+Missing or inconsistent metadata fails compilation. The caller still owns
+the [pointer validity and lifetime requirements](../../cuda-oxide-book/gpu-programming/kernels-and-device-functions.md#grid-constant-parameters)
+for data accessed through the value.
+
 The CUDA kernel marker also has an exact mapping:
 
 ```text
@@ -128,10 +144,9 @@ gpu_kernel = "true"        → cute.kernel
 anything else              → translation error
 ```
 
-## The first CuTe slice
+## Tensor operations
 
-The elementwise path keeps the useful layout explanation instead of reducing
-everything to pointer arithmetic first:
+The elementwise path keeps tensor layouts visible until CUTLASS lowers them:
 
 ```text
 make tensor
@@ -147,11 +162,10 @@ pick this thread's tile
     └── edge tile ──► checked scalar load/store
 ```
 
-The profile recognizes the corresponding `cute.tensor_*` operations and maps
-them to CUTLASS's `cute` and `cute_nvgpu` operations. Before translation, it
-runs the shared backend-neutral whole-module verifier directly. The exporter
-does not invoke native CuTe expansion or use native generated-intrinsic markers
-as an intermediate representation.
+The profile maps `cute.tensor_*` operations to CUTLASS's `cute` and
+`cute_nvgpu` operations. First, the shared verifier checks tensor origins,
+pipeline state, and operation ordering across the module. The verified CuTe
+operations then go directly to MLIR translation.
 
 Thread, block, and grid coordinates are direct NVVM mappings. For example:
 

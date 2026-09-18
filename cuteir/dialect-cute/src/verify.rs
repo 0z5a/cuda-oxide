@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! Backend-neutral verification for complete high-level CuTe stories.
+//! Check CuTe values and operation order before either backend lowers them.
 //!
-//! This module is deliberately analysis-only. It follows semantic SSA
-//! provenance, checks closed use graphs and ordered protocols, and audits
-//! compiler-only CuTe types without cloning or rewriting the input module.
+//! This module follows where values come from and how they are used. It checks
+//! pipeline ordering and restrictions on compiler-only types without changing
+//! the input module.
 
 use std::collections::{HashMap, HashSet};
 

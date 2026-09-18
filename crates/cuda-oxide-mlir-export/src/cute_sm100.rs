@@ -3,14 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! SM100 CuTe semantic plans lowered by the pinned CUTLASS 4.7 compiler.
+//! Map SM100 CuTe plans to operations accepted by the pinned CUTLASS 4.7 compiler.
 //!
 //! Allocation, tensor-memory copies, cluster TMA, and shared-memory descriptors
-//! use native CuTe operations. The public 4.7 `sm100.mma` atom exposes no A
-//! collector field (its fields are accumulate, negate A/B and disable lanes).
-//! The collector-aware MMA instruction therefore uses an NVVM architecture leaf:
-//! its descriptors come from CuTe layouts and its shape/collector sequence come
-//! from the verified tiled-MMA plan, never raw Rust instruction descriptors.
+//! use native CuTe operations. CUTLASS 4.7's `sm100.mma` atom cannot select when
+//! to fill or release the A collector, so MMA uses an NVVM TCGen05 instruction.
+//! CuTe layouts supply its descriptors; the verified tiled-MMA plan supplies
+//! its shape and collector sequence:
+//!
+//! ```text
+//! each K16 step: first N partition -> fill A collector
+//!               second partition -> last use of A collector
+//! ```
 
 use dialect_cute::{
     attributes::{CuteComposedLayoutAttr, CuteTmaStorePipelineAttr},

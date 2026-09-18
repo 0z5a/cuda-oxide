@@ -6,9 +6,9 @@
 //! SM120 block-scaled GEMM mappings for the official CUTLASS 4.7 compiler.
 //!
 //! The source dialect keeps scheduler, pipeline, TMA, MMA, and epilogue
-//! contracts visible.  This pack erases only compiler-only handles and lowers
-//! their runtime leaves to operations accepted by the public PRE_COMPILED
-//! pipeline in `libCutlassCompiler.so`.
+//! operations visible. This pack removes compile-time handles and maps their
+//! runtime work to operations accepted by the public PRE_COMPILED pipeline
+//! in `libCutlassCompiler.so`.
 
 use dialect_cute::{
     attributes::{

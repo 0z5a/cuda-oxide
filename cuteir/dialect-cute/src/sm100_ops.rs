@@ -115,8 +115,8 @@ impl Verify for CuteSm100MmaPlanAttr {
             || self.tmem_columns != 512
             || !(16..=256).contains(&self.n0)
             || !(16..=256).contains(&self.n1)
-            || self.n0 % 16 != 0
-            || self.n1 % 16 != 0
+            || !self.n0.is_multiple_of(16)
+            || !self.n1.is_multiple_of(16)
             || self.n0 + self.n1 > self.tmem_columns
         {
             return verify_err_noloc!(
@@ -218,13 +218,13 @@ impl Verify for CuteSm100PipelinePlanAttr {
             if self.stages != 1
                 || self.consumer_arrivals == 0
                 || self.consumer_arrivals > 64
-                || self.consumer_arrivals % 2 != 0
+                || !self.consumer_arrivals.is_multiple_of(2)
             {
                 return verify_err_noloc!(
                     "SM100 accumulator pipeline requires one stage and an even number of consumer arrivals in 2..=64"
                 );
             }
-        } else if self.consumer_arrivals != 1 || self.transaction_bytes % 16 != 0 {
+        } else if self.consumer_arrivals != 1 || !self.transaction_bytes.is_multiple_of(16) {
             return verify_err_noloc!(
                 "SM100 input pipeline requires one MMA completion arrival and a transaction size divisible by 16"
             );
