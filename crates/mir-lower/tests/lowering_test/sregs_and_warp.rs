@@ -584,7 +584,9 @@ fn test_assertfail_lowers_to_noreturn_call_and_unreachable() -> Result<(), anyho
         if name == EXTERN {
             found_decl = true;
             assert!(
-                llvm::op_noreturn(&ctx, func_op.get_operation()),
+                func_op.get_attr_llvm_func_attrs(&ctx).is_some_and(|attrs| {
+                    matches!(attrs.get("noreturn"), Some(llvm::LlvmAttrValue::Unit))
+                }),
                 "__assertfail declaration must be marked noreturn"
             );
             continue;
@@ -606,7 +608,9 @@ fn test_assertfail_lowers_to_noreturn_call_and_unreachable() -> Result<(), anyho
                     found_call = true;
 
                     assert!(
-                        llvm::op_noreturn(&ctx, body_op),
+                        call.get_attr_llvm_call_attrs(&ctx).is_some_and(|attrs| {
+                            matches!(attrs.get("noreturn"), Some(llvm::LlvmAttrValue::Unit))
+                        }),
                         "__assertfail call must be marked noreturn"
                     );
                     assert_eq!(
