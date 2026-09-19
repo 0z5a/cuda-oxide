@@ -642,21 +642,36 @@ pub fn doctor(ctx: &Context) {
     // leave `/usr/lib/clang/*/include` empty and bindgen explodes with a
     // mysterious "'stddef.h' file not found". Catch that up front.
     print!("clang / libclang resource dir... ");
-    let clang_resource_dir = Command::new("clang")
-        .arg("-print-resource-dir")
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    let clangs = [
+        "clang", "clang-21", "clang-20", "clang-19", "clang-18", "clang-17", "clang-16", "clang-15",
+    ];
+
+    let found = clangs.into_iter().find_map(|c| {
+        Command::new(c)
+            .arg("--version")
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|_| c)
+    });
+
+    let clang_resource_dir = found.and_then(|name| {
+        Command::new(name)
+            .arg("-print-resource-dir")
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| (name, String::from_utf8_lossy(&o.stdout).trim().to_string()))
+    });
+
     match clang_resource_dir {
-        Some(ref dir) if std::path::Path::new(&format!("{}/include/stddef.h", dir)).exists() => {
-            println!("✓ {}", dir);
+        Some((name, ref dir))
+            if std::path::Path::new(&format!("{}/include/stddef.h", dir)).exists() =>
+        {
+            println!("✓ {dir} (via {name})");
         }
-        Some(ref dir) => {
-            println!(
-                "✗ resource dir present but `include/stddef.h` missing: {}",
-                dir
-            );
+        Some((name, ref dir)) => {
+            println!("✗ resource dir present but `include/stddef.h` missing: {dir} (via {name})");
             eprintln!("  Host `cuda-bindings` uses bindgen, which needs clang's own stddef.h.");
             eprintln!("  Install the matching dev headers: sudo apt install clang-21");
             eprintln!("  (or libclang-common-21-dev)");
