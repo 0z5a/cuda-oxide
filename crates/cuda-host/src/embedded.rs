@@ -162,6 +162,12 @@ pub fn merge_ptx_bundles<'a>(
     let mut merged = String::new();
     let mut found_any = false;
 
+    // Debug `.file` indices are per-module sequence numbers starting at 1,
+    // so concatenated lineinfo/debug bundles redeclare each other's indices
+    // and ptxas rejects the module ("Duplicate file index"). Each appended
+    // bundle's indices are shifted past the running maximum (#1292).
+    let mut file_index_offset = 0;
+
     for bundle in bundles {
         if let Some(ptx_bytes) = bundle.payload(ArtifactPayloadKind::Ptx) {
             let ptx_str = std::str::from_utf8(ptx_bytes)
@@ -170,24 +176,20 @@ pub fn merge_ptx_bundles<'a>(
                 })?
                 .trim_end_matches('\0');
 
-            if !found_any {
-                merged.push_str(ptx_str);
-                merged.push('\n');
-                found_any = true;
-            } else {
-                // Strip per-file header directives; only one set is valid in a
-                // concatenated PTX module.
-                let body = strip_ptx_module_headers(ptx_str).map_err(|reason| {
-                    EmbeddedModuleError::InvalidPtx {
+            let strip_headers = found_any;
+            let (body, max_file_index) =
+                prepare_bundle_body(ptx_str, strip_headers, file_index_offset).map_err(
+                    |reason| EmbeddedModuleError::InvalidPtx {
                         name: bundle.name.clone(),
                         reason,
-                    }
-                })?;
-                merged.push_str(&body);
-                if !body.ends_with('\n') {
-                    merged.push('\n');
-                }
+                    },
+                )?;
+            file_index_offset = file_index_offset.max(max_file_index);
+            merged.push_str(&body);
+            if !body.ends_with('\n') {
+                merged.push('\n');
             }
+            found_any = true;
         }
     }
 
@@ -197,19 +199,98 @@ pub fn merge_ptx_bundles<'a>(
     Ok(merged)
 }
 
-fn strip_ptx_module_headers(ptx: &str) -> Result<String, String> {
+/// Rewrite one bundle's PTX for concatenation: strip the per-file header
+/// directives (`.version`/`.target`/`.address_size`) unless this is the first
+/// bundle, and shift every debug file index (`.file` declarations, `.loc`
+/// references, and `.loc ... inlined_at` references) by `file_index_offset`.
+///
+/// Returns the rewritten text and the highest file index it declares or
+/// references after shifting, so the caller can offset the next bundle past
+/// it. Bundles without debug info report `0` and are unaffected.
+fn prepare_bundle_body(
+    ptx: &str,
+    strip_headers: bool,
+    file_index_offset: u64,
+) -> Result<(String, u64), String> {
     let document = ptx_parse::Document::parse(ptx).map_err(|error| error.to_string())?;
     let mut edits = ptx_parse::EditScript::new();
-    for directive in document
-        .directives()
-        .iter()
-        .filter(|directive| matches!(directive.name(), ".version" | ".target" | ".address_size"))
-    {
+    let mut max_file_index = 0u64;
+
+    for directive in document.directives() {
+        match directive.name() {
+            ".version" | ".target" | ".address_size" if strip_headers => {
+                edits
+                    .delete(directive.line_span())
+                    .map_err(|error| error.to_string())?;
+            }
+            // `.file <index> "path"[, timestamp, size]`
+            ".file" => {
+                let index = shift_file_index(
+                    &mut edits,
+                    directive.arguments(),
+                    directive.arguments_span().start,
+                    0,
+                    file_index_offset,
+                )?;
+                max_file_index = max_file_index.max(index);
+            }
+            // `.loc <index> <line> <column>[, function_name f, inlined_at
+            // <index> <line> <column>]` — both indices reference the file
+            // table and both must move with it.
+            ".loc" => {
+                let arguments = directive.arguments();
+                let base = directive.arguments_span().start;
+                let index = shift_file_index(&mut edits, arguments, base, 0, file_index_offset)?;
+                max_file_index = max_file_index.max(index);
+                if let Some(position) = arguments.find("inlined_at") {
+                    let after = position + "inlined_at".len();
+                    let index =
+                        shift_file_index(&mut edits, arguments, base, after, file_index_offset)?;
+                    max_file_index = max_file_index.max(index);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let body = edits.apply(ptx).map_err(|error| error.to_string())?;
+    Ok((body, max_file_index))
+}
+
+/// Replace the first integer at or after `from` in `arguments` with itself
+/// plus `offset`, recording the edit against the whole document (arguments
+/// start at document offset `base`). Returns the shifted value.
+fn shift_file_index(
+    edits: &mut ptx_parse::EditScript,
+    arguments: &str,
+    base: usize,
+    from: usize,
+    offset: u64,
+) -> Result<u64, String> {
+    let bytes = arguments.as_bytes();
+    let mut start = from;
+    while start < bytes.len() && !bytes[start].is_ascii_digit() {
+        start += 1;
+    }
+    let mut end = start;
+    while end < bytes.len() && bytes[end].is_ascii_digit() {
+        end += 1;
+    }
+    if start == end {
+        return Err(format!(
+            "malformed debug directive: no file index in {arguments:?}"
+        ));
+    }
+    let index: u64 = arguments[start..end]
+        .parse()
+        .map_err(|_| format!("debug file index out of range in {arguments:?}"))?;
+    let shifted = index + offset;
+    if offset != 0 {
         edits
-            .delete(directive.line_span())
+            .replace(base + start..base + end, shifted.to_string())
             .map_err(|error| error.to_string())?;
     }
-    edits.apply(ptx).map_err(|error| error.to_string())
+    Ok(shifted)
 }
 
 /// Load the first embedded artifact bundle with a supported payload.
@@ -387,9 +468,77 @@ mod tests {
 .address_size 64
 .visible .entry kernel() { ret; }
 ";
+        let (body, max_file_index) = prepare_bundle_body(ptx, true, 0).unwrap();
+        assert_eq!(body, "// .target sm_1\n.visible .entry kernel() { ret; }\n");
+        assert_eq!(max_file_index, 0);
+    }
+
+    /// Debug file indices are per-module, so each appended bundle's `.file`
+    /// declarations and `.loc` references (including `inlined_at`) must shift
+    /// past the running maximum, or ptxas rejects the merged module with
+    /// "Duplicate file index" (#1292). The first bundle keeps its indices.
+    #[test]
+    fn merged_bundles_renumber_debug_file_indices_per_bundle() {
+        let first = ptx_bundle(
+            "first",
+            "\
+.version 8.9
+.target sm_80
+.address_size 64
+.file 1 \"a/lib.rs\"
+.file 2 \"shared/thread.rs\"
+.visible .entry a()
+{
+\t.loc\t1 10 5
+\tret;
+}
+",
+        );
+        let second = ptx_bundle(
+            "second",
+            "\
+.version 8.9
+.target sm_80
+.address_size 64
+.file 1 \"b/main.rs\"
+.visible .entry b()
+{
+\t.loc\t1 3 1, function_name $f, inlined_at 1 7 0
+\tret;
+}
+",
+        );
+        let plain = ptx_bundle(
+            "plain",
+            ".version 8.9\n.target sm_80\n.address_size 64\n.visible .entry c() { ret; }\n",
+        );
+
+        let merged = merge_ptx_bundles([&first, &plain, &second]).unwrap();
+
+        // First bundle's table and references are untouched.
+        assert!(merged.contains(".file 1 \"a/lib.rs\""));
+        assert!(merged.contains(".file 2 \"shared/thread.rs\""));
+        assert!(merged.contains(".loc\t1 10 5"));
+
+        // The debug-free middle bundle does not advance the offset; the
+        // second debug bundle continues after the first's maximum of 2 —
+        // declaration, `.loc` reference, and `inlined_at` reference alike.
+        assert!(merged.contains(".file 3 \"b/main.rs\""));
+        assert!(merged.contains(".loc\t3 3 1, function_name $f, inlined_at 3 7 0"));
+
+        // No index is declared twice across the merged module.
+        let declared: Vec<&str> = merged
+            .lines()
+            .filter(|line| line.trim_start().starts_with(".file"))
+            .map(|line| line.split_whitespace().nth(1).unwrap())
+            .collect();
+        let mut deduped = declared.clone();
+        deduped.sort_unstable();
+        deduped.dedup();
         assert_eq!(
-            strip_ptx_module_headers(ptx).unwrap(),
-            "// .target sm_1\n.visible .entry kernel() { ret; }\n"
+            declared.len(),
+            deduped.len(),
+            "duplicate .file index: {declared:?}"
         );
     }
 
