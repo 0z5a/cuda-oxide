@@ -394,6 +394,54 @@ mod kernels {
             *out_elem = acc;
         }
     }
+
+    /// Exit tests that compare the counter plus a constant, the way one writes
+    /// "stop when a whole tile no longer fits". `while i + 1 <= 4` fully unrolls
+    /// like `while i < 4` (`1 + 4 + 16 + 64 = 85`); the tile walk
+    /// `while d + 2 <= 8` visits `0 + 2 + 4 + 6 = 12`; and `#[unroll(4)]` on
+    /// `while j + 1 <= n` sums `j` over `0..n`, `n*(n-1)/2`.
+    #[allow(clippy::int_plus_one)]
+    #[kernel]
+    pub fn offset_exit_tests(
+        mut bits: DisjointSlice<u32>,
+        mut walk: DisjointSlice<u32>,
+        mut partial: DisjointSlice<u32>,
+        n: u32,
+    ) {
+        let (Some(bits), Some(walk), Some(partial)) = (
+            bits.get_mut(thread::index_1d()),
+            walk.get_mut(thread::index_1d()),
+            partial.get_mut(thread::index_1d()),
+        ) else {
+            return;
+        };
+        let mut set = 0u32;
+        let mut i = 0usize;
+        #[unroll]
+        while i + 1 <= 4 {
+            set |= 1u32 << (2 * i);
+            i += 1;
+        }
+        const TILE: usize = 2;
+        const WIDTH: usize = 8;
+        let mut visited = 0u32;
+        let mut d = 0usize;
+        #[unroll]
+        while d + TILE <= WIDTH {
+            visited += d as u32;
+            d += TILE;
+        }
+        let mut sum = 0u32;
+        let mut j = 0u32;
+        #[unroll(4)]
+        while j + 1 <= n {
+            sum = sum.wrapping_add(j);
+            j += 1;
+        }
+        *bits = set;
+        *walk = visited;
+        *partial = sum;
+    }
 }
 
 fn main() {
@@ -528,6 +576,39 @@ fn main() {
     unsafe { module.outer_partial(stream.as_ref(), cfg, &mut d_opart, trip) }
         .expect("launch outer_partial");
     let got_opart = d_opart.to_host_vec(&stream).unwrap();
+
+    for offset_trip in [7u32, 16] {
+        let mut d_bits = DeviceBuffer::<u32>::zeroed(&stream, N).unwrap();
+        let mut d_walk = DeviceBuffer::<u32>::zeroed(&stream, N).unwrap();
+        let mut d_offset_part = DeviceBuffer::<u32>::zeroed(&stream, N).unwrap();
+        // SAFETY: each thread writes its own element in three separate buffers.
+        unsafe {
+            module.offset_exit_tests(
+                stream.as_ref(),
+                cfg,
+                &mut d_bits,
+                &mut d_walk,
+                &mut d_offset_part,
+                offset_trip,
+            )
+        }
+        .expect("launch offset_exit_tests");
+        assert_eq!(
+            d_bits.to_host_vec(&stream).unwrap(),
+            vec![85; N],
+            "offset exit test `i + 1 <= 4`"
+        );
+        assert_eq!(
+            d_walk.to_host_vec(&stream).unwrap(),
+            vec![12; N],
+            "tile walk `d + 2 <= 8`"
+        );
+        assert_eq!(
+            d_offset_part.to_host_vec(&stream).unwrap(),
+            vec![offset_trip * (offset_trip - 1) / 2; N],
+            "partial offset exit test `j + 1 <= {offset_trip}`"
+        );
+    }
 
     let mut failures = 0usize;
     let want_part = trip * (trip - 1) / 2;

@@ -14,12 +14,15 @@
 mod common;
 
 use common::{
-    counted_loop, counted_loop_from_step, early_exit_counted_loop, early_exit_with_direct_liveout,
-    mir_ctx, multi_latch_counted_loop, multiple_exit_counted_loop, nested_counted_loop,
+    OffsetBound, counted_loop, counted_loop_from_step, early_exit_counted_loop,
+    early_exit_with_direct_liveout, mir_ctx, multi_latch_counted_loop, multiple_exit_counted_loop,
+    nested_counted_loop, offset_counted_loop, u32t,
 };
 use dialect_mir::ops::{
-    MirBitAndOp, MirCallOp, MirCondBranchOp, MirConstantOp, MirGeOp, MirReturnOp, MirUnrollHintOp,
+    MirBitAndOp, MirCallOp, MirCondBranchOp, MirConstantOp, MirGeOp, MirGtOp, MirLtOp, MirReturnOp,
+    MirUnrollHintOp,
 };
+use mir_transforms::analyses::induction::{CmpPred, analyze};
 use mir_transforms::unroll::unroll_annotated_loops;
 use pliron::attribute::Attribute;
 use pliron::builtin::attributes::{IntegerAttr, StringAttr};
@@ -542,6 +545,180 @@ fn huge_partial_unroll_factor_is_skipped_before_cloning() {
         .expect("an oversized partial-unroll request is a warning + skip");
 
     pliron::operation::verify_operation(lp.module, &ctx).expect("skipped loop remains valid");
+    assert_eq!(loop_count(&ctx, lp.region), 1, "the source loop remains");
+    assert_eq!(hint_count(&ctx, lp.region), 0, "the request was consumed");
+}
+
+fn op_count<T: Op>(ctx: &Context, region: Ptr<Region>) -> usize {
+    operations(ctx, region)
+        .into_iter()
+        .filter(|&op| Operation::get_op::<T>(op, ctx).is_some())
+        .count()
+}
+
+/// The trip count the induction analysis computes for `lp`.
+fn analyzed_trip_count(ctx: &Context, lp: &common::CountedLoop) -> Option<u64> {
+    let info = loop_info(ctx, lp.region);
+    let id = info.innermost_loop(lp.header).unwrap();
+    let ph = info.preheader(ctx, lp.region, id).unwrap();
+    analyze(ctx, &info, id, ph).trip_count
+}
+
+/// Plant an unroll hint (`factor` 0 = full) in the latch and run the pass.
+fn unroll_offset_loop(ctx: &mut Context, lp: &common::CountedLoop, factor: u32) {
+    MirUnrollHintOp::new(ctx, factor)
+        .get_operation()
+        .insert_at_front(lp.latch, ctx);
+    let mut analyses = AnalysisManager::default();
+    unroll_annotated_loops(lp.module, ctx, &mut analyses).expect("unroll pass succeeds");
+    pliron::operation::verify_operation(lp.module, ctx).expect("valid IR after the pass");
+}
+
+/// `while i + 1 <= 4 { acc += i; i += 1 }` fully unrolls: no loop is left and
+/// the function returns the constant `0 + 1 + 2 + 3`.
+#[test]
+fn full_unroll_of_a_counter_offset_exit_test_folds_the_sum() {
+    let mut ctx = mir_ctx();
+    let u32 = u32t(&mut ctx);
+    let lp = offset_counted_loop(&mut ctx, u32, 0, 1, 1, CmpPred::Le, OffsetBound::Const(4));
+
+    unroll_offset_loop(&mut ctx, &lp, 0);
+
+    assert_eq!(loop_count(&ctx, lp.region), 0);
+    assert_eq!(sole_return_constant(&ctx, lp.region), Some(6));
+}
+
+/// `while i + 2 <= u32::MAX` from `u32::MAX - 5`: the analysis counts four
+/// trips, but at the fifth test `i + 2` wraps to 0, which is still `<= MAX`, so
+/// the source loop keeps going. Full unroll must skip it.
+#[test]
+fn full_unroll_skips_a_counter_offset_that_wraps_at_the_last_test() {
+    let mut ctx = mir_ctx();
+    let u32 = u32t(&mut ctx);
+    let max = i128::from(u32::MAX);
+    let lp = offset_counted_loop(
+        &mut ctx,
+        u32,
+        max - 5,
+        1,
+        2,
+        CmpPred::Le,
+        OffsetBound::Const(max),
+    );
+    assert_eq!(
+        analyzed_trip_count(&ctx, &lp),
+        Some(4),
+        "the analysis recognizes the test; only the wrap check may refuse it"
+    );
+
+    unroll_offset_loop(&mut ctx, &lp, 0);
+
+    assert_eq!(loop_count(&ctx, lp.region), 1, "the source loop remains");
+    assert_eq!(hint_count(&ctx, lp.region), 0, "the request was consumed");
+}
+
+/// `while i - 1 < 4` with an unsigned counter from 0: `0 - 1` wraps to
+/// `u32::MAX`, so the source loop runs zero times, not five. Full unroll must
+/// skip it.
+#[test]
+fn full_unroll_skips_a_counter_offset_that_wraps_at_the_first_test() {
+    let mut ctx = mir_ctx();
+    let u32 = u32t(&mut ctx);
+    let lp = offset_counted_loop(&mut ctx, u32, 0, 1, -1, CmpPred::Lt, OffsetBound::Const(4));
+    assert_eq!(
+        analyzed_trip_count(&ctx, &lp),
+        Some(5),
+        "the analysis recognizes the test; only the wrap check may refuse it"
+    );
+
+    unroll_offset_loop(&mut ctx, &lp, 0);
+
+    assert_eq!(loop_count(&ctx, lp.region), 1, "the source loop remains");
+    assert_eq!(hint_count(&ctx, lp.region), 0, "the request was consumed");
+}
+
+/// `#[unroll(4)]` on `while i + 1 <= n` with a runtime `n` builds a main loop
+/// and keeps the source loop as the remainder.
+#[test]
+fn partial_unroll_of_a_counter_offset_exit_test_keeps_a_remainder() {
+    let mut ctx = mir_ctx();
+    let u32 = u32t(&mut ctx);
+    let lp = offset_counted_loop(&mut ctx, u32, 0, 1, 1, CmpPred::Le, OffsetBound::Param);
+
+    unroll_offset_loop(&mut ctx, &lp, 4);
+
+    assert_eq!(loop_count(&ctx, lp.region), 2, "main loop + remainder");
+    assert_eq!(hint_count(&ctx, lp.region), 0, "the request was consumed");
+}
+
+/// From `u32::MAX - 5`, `while i + 4 <= n` never runs for `n = 10`, but in a
+/// group of four the last counter is `u32::MAX - 2` and `(u32::MAX - 2) + 4`
+/// wraps to 1, which passes `<= 10`. The main-loop guard must also require
+/// `last + 4 > last`, so it has three tests joined by two `&`.
+#[test]
+fn partial_unroll_guards_a_positive_counter_offset_against_wraparound() {
+    let mut ctx = mir_ctx();
+    let u32 = u32t(&mut ctx);
+    let max = i128::from(u32::MAX);
+    let lp = offset_counted_loop(
+        &mut ctx,
+        u32,
+        max - 5,
+        1,
+        4,
+        CmpPred::Le,
+        OffsetBound::Param,
+    );
+
+    unroll_offset_loop(&mut ctx, &lp, 4);
+
+    assert_eq!(loop_count(&ctx, lp.region), 2, "main loop + remainder");
+    assert_eq!(
+        op_count::<MirGtOp>(&ctx, lp.region),
+        1,
+        "the guard checks that last + offset did not wrap"
+    );
+    assert_eq!(
+        op_count::<MirBitAndOp>(&ctx, lp.region),
+        2,
+        "in bounds, counter no-wrap, and offset no-wrap"
+    );
+}
+
+/// With `while i - 1 < n` from 0, the first test computes `0 - 1`, which wraps.
+/// The main-loop guard must also require `first - 1 < first`, so the group
+/// is left to the remainder loop whenever that subtraction wraps.
+#[test]
+fn partial_unroll_guards_a_negative_counter_offset_against_wraparound() {
+    let mut ctx = mir_ctx();
+    let u32 = u32t(&mut ctx);
+    let lp = offset_counted_loop(&mut ctx, u32, 0, 1, -1, CmpPred::Lt, OffsetBound::Param);
+
+    unroll_offset_loop(&mut ctx, &lp, 4);
+
+    assert_eq!(loop_count(&ctx, lp.region), 2, "main loop + remainder");
+    assert_eq!(
+        op_count::<MirLtOp>(&ctx, lp.region),
+        3,
+        "the source test, the main-loop bound test, and first - 1 < first"
+    );
+    assert_eq!(
+        op_count::<MirBitAndOp>(&ctx, lp.region),
+        2,
+        "in bounds, counter no-wrap, and offset no-wrap"
+    );
+}
+
+/// `while i + 1 < acc + 8` has a counter but no counted exit test. Full unroll
+/// skips it and leaves the loop as it was.
+#[test]
+fn counter_with_an_unrecognized_exit_test_is_skipped() {
+    let mut ctx = mir_ctx();
+    let u32 = u32t(&mut ctx);
+    let lp = offset_counted_loop(&mut ctx, u32, 0, 1, 1, CmpPred::Lt, OffsetBound::AccPlus(8));
+
+    unroll_offset_loop(&mut ctx, &lp, 0);
+
     assert_eq!(loop_count(&ctx, lp.region), 1, "the source loop remains");
     assert_eq!(hint_count(&ctx, lp.region), 0, "the request was consumed");
 }
