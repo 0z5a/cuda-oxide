@@ -144,6 +144,58 @@ fn unique_temp_dir(prefix: &str) -> PathBuf {
     std::env::temp_dir().join(format!("{}_{}_{}", prefix, std::process::id(), unique))
 }
 
+#[cfg(unix)]
+fn doctor_clang_fixture(root: &Path, name: &str, resource_response: &str) -> String {
+    use std::os::unix::fs::PermissionsExt;
+
+    let path = root.join(name);
+    fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\ncase \"$1\" in\n--version) echo clang; exit 0;;\n-print-resource-dir) {resource_response};;\nesac\nexit 1\n"
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    path.to_string_lossy().into_owned()
+}
+
+#[cfg(unix)]
+#[test]
+fn doctor_clang_resource_falls_back_after_absent_failed_and_empty_probes() {
+    let root = unique_temp_dir("cargo_oxide_doctor_clang_fallback");
+    fs::create_dir_all(&root).unwrap();
+    let absent = root.join("clang").to_string_lossy().into_owned();
+    let failed = doctor_clang_fixture(&root, "clang-22", "exit 1");
+    let empty = doctor_clang_fixture(&root, "clang-21", "printf '   \n'; exit 0");
+    let working = doctor_clang_fixture(
+        &root,
+        "clang-20",
+        "printf ' /clang/resource dir \n'; exit 0",
+    );
+    assert_eq!(
+        clang_resource_dir(&[&absent, &failed, &empty, &working]),
+        Some((working.as_str(), "/clang/resource dir".to_string()))
+    );
+    assert_eq!(clang_resource_dir(&[&absent, &failed, &empty]), None);
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn doctor_clang_resource_prefers_the_first_successful_candidate() {
+    let root = unique_temp_dir("cargo_oxide_doctor_clang_precedence");
+    fs::create_dir_all(&root).unwrap();
+    let bare = doctor_clang_fixture(&root, "clang", "printf '/bare/resource\n'; exit 0");
+    let versioned =
+        doctor_clang_fixture(&root, "clang-22", "printf '/versioned/resource\n'; exit 0");
+    assert_eq!(
+        clang_resource_dir(&[&bare, &versioned]),
+        Some((bare.as_str(), "/bare/resource".to_string()))
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
 /// The examples walk backing `cargo oxide fmt` must reach nested manifests
 /// and skip build directories.
 ///
