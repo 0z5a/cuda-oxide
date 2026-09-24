@@ -44,7 +44,7 @@
 //! a constant `bound` are all known. For `i = 0; i < 16; i += 4` the trip count
 //! is 4. The test may also add a constant to the counter first, as in
 //! `i + 2 <= 16` ("a whole tile of two still fits"); that is the same as
-//! `i <= 14`.
+//! `i <= 14` when the addition does not wrap.
 //!
 //! This is a small, reusable stand-in for full scalar evolution that the
 //! unroller (and later loop passes) build on. It is deliberately cautious:
@@ -142,7 +142,9 @@ pub struct LoopRecurrences {
     /// `IV <continue_pred> bound` holds (e.g. `<` for `while i < n`).
     pub continue_pred: Option<CmpPred>,
     /// How many times the body runs, when `init`, `step`, `bound`, and the
-    /// predicate are all known constants; `None` otherwise.
+    /// predicate are all known constants; `None` otherwise. This is the count
+    /// over mathematical integers: consumers must prove that the counter and
+    /// its exit-test offset do not wrap in the actual integer type.
     pub trip_count: Option<u64>,
 }
 
@@ -459,8 +461,8 @@ struct Guard {
     pred: CmpPred,
 }
 
-/// If `v` is a header argument `a` or `a +/- c` for a constant `c`, return the
-/// argument's index and the constant (0 for `a` itself).
+/// If `v` is `a +/- c` for a header argument `a` and constant `c`, return
+/// the argument's index and the offset.
 fn header_arg_plus_constant(
     ctx: &Context,
     v: Value,

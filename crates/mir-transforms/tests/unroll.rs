@@ -19,15 +19,15 @@ use common::{
     nested_counted_loop, offset_counted_loop, u32t,
 };
 use dialect_mir::ops::{
-    MirBitAndOp, MirCallOp, MirCondBranchOp, MirConstantOp, MirGeOp, MirGtOp, MirLtOp, MirReturnOp,
-    MirUnrollHintOp,
+    MirAddOp, MirBitAndOp, MirCallOp, MirCondBranchOp, MirConstantOp, MirGeOp, MirGtOp, MirLeOp,
+    MirLtOp, MirNotOp, MirReturnOp, MirSubOp, MirUnrollHintOp,
 };
 use mir_transforms::analyses::induction::{CmpPred, analyze};
 use mir_transforms::unroll::unroll_annotated_loops;
 use pliron::attribute::Attribute;
 use pliron::builtin::attributes::{IntegerAttr, StringAttr};
 use pliron::builtin::ops::ConstantOp;
-use pliron::builtin::types::FunctionType;
+use pliron::builtin::types::{FunctionType, IntegerType, Signedness};
 use pliron::context::{Context, Ptr};
 use pliron::graph::{ControlFlowGraph, dominance::DomInfo};
 use pliron::linked_list::ContainsLinkedList;
@@ -35,6 +35,9 @@ use pliron::op::Op;
 use pliron::operation::Operation;
 use pliron::pass::AnalysisManager;
 use pliron::region::Region;
+use pliron::r#type::{Typed, TypedHandle};
+use pliron::value::Value;
+use std::collections::HashMap;
 
 use mir_transforms::analyses::loop_info::LoopInfo;
 
@@ -721,4 +724,146 @@ fn counter_with_an_unrecognized_exit_test_is_skipped() {
 
     assert_eq!(loop_count(&ctx, lp.region), 1, "the source loop remains");
     assert_eq!(hint_count(&ctx, lp.region), 0, "the request was consumed");
+}
+
+/// Evaluate the generated guard with the MIR integer type's wrapping semantics.
+/// Inputs substitute the new header's counter and the original runtime bound.
+fn evaluate_integer(ctx: &Context, value: Value, inputs: &HashMap<Value, i128>) -> i128 {
+    let raw = if let Some(&input) = inputs.get(&value) {
+        input
+    } else if let Some(constant) = constant_i128(ctx, value) {
+        constant
+    } else {
+        let op = value.defining_op().expect("guard value has a definition");
+        let lhs = evaluate_integer(ctx, op.deref(ctx).get_operand(0), inputs);
+        if Operation::get_op::<MirNotOp>(op, ctx).is_some() {
+            !lhs
+        } else {
+            let rhs = evaluate_integer(ctx, op.deref(ctx).get_operand(1), inputs);
+            if Operation::get_op::<MirAddOp>(op, ctx).is_some() {
+                lhs + rhs
+            } else if Operation::get_op::<MirSubOp>(op, ctx).is_some() {
+                lhs - rhs
+            } else if Operation::get_op::<MirBitAndOp>(op, ctx).is_some() {
+                lhs & rhs
+            } else if Operation::get_op::<MirLtOp>(op, ctx).is_some() {
+                i128::from(lhs < rhs)
+            } else if Operation::get_op::<MirLeOp>(op, ctx).is_some() {
+                i128::from(lhs <= rhs)
+            } else if Operation::get_op::<MirGtOp>(op, ctx).is_some() {
+                i128::from(lhs > rhs)
+            } else if Operation::get_op::<MirGeOp>(op, ctx).is_some() {
+                i128::from(lhs >= rhs)
+            } else {
+                panic!("unexpected operation in the integer guard")
+            }
+        }
+    };
+    let ty = TypedHandle::<IntegerType>::from_handle(value.get_type(ctx), ctx).unwrap();
+    let width = ty.deref(ctx).width();
+    assert!(
+        (1..=32).contains(&width),
+        "this evaluator covers narrow integers"
+    );
+    let modulus = 1i128 << width;
+    let bits = raw.rem_euclid(modulus);
+    if ty.deref(ctx).signedness() == Signedness::Signed && bits >= modulus / 2 {
+        bits - modulus
+    } else {
+        bits
+    }
+}
+
+#[test]
+fn partial_offset_guard_admits_exactly_the_non_wrapping_in_bounds_groups() {
+    for signedness in [Signedness::Signed, Signedness::Unsigned] {
+        let (min, max, bounds, offsets) = if signedness == Signedness::Signed {
+            (
+                -128,
+                127,
+                vec![-128, -127, -1, 0, 1, 126, 127],
+                vec![-127, -2, -1, 0, 1, 2, 127],
+            )
+        } else {
+            (
+                0,
+                255,
+                vec![0, 1, 2, 127, 254, 255],
+                vec![-255, -2, -1, 0, 1, 2, 255],
+            )
+        };
+        for offset in offsets {
+            for (step, factor) in [(1, 4), (3, 2), (16, 4)] {
+                for pred in [CmpPred::Lt, CmpPred::Le] {
+                    let mut ctx = mir_ctx();
+                    let ty = IntegerType::get(&ctx, 8, signedness);
+                    let lp = offset_counted_loop(
+                        &mut ctx,
+                        ty,
+                        min,
+                        step,
+                        offset,
+                        pred,
+                        OffsetBound::Param,
+                    );
+                    unroll_offset_loop(&mut ctx, &lp, factor);
+                    assert_eq!(loop_count(&ctx, lp.region), 2);
+                    let entry = lp.preheader.deref(&ctx).get_terminator(&ctx).unwrap();
+                    let main = entry.deref(&ctx).get_successor(0);
+                    let branch = main.deref(&ctx).get_terminator(&ctx).unwrap();
+                    assert!(Operation::get_op::<MirCondBranchOp>(branch, &ctx).is_some());
+                    let guard = branch.deref(&ctx).get_operand(0);
+                    let counter = main.deref(&ctx).get_argument(1);
+                    let bound_arg = lp.preheader.deref(&ctx).get_argument(0);
+
+                    for first in min..=max {
+                        for &bound in &bounds {
+                            let expected = (0..factor).all(|j| {
+                                let iv = first + i128::from(j) * step;
+                                let tested = iv + offset;
+                                (min..=max).contains(&iv)
+                                    && (min..=max).contains(&tested)
+                                    && match pred {
+                                        CmpPred::Lt => tested < bound,
+                                        CmpPred::Le => tested <= bound,
+                                        _ => unreachable!(),
+                                    }
+                            });
+                            let inputs = HashMap::from([(counter, first), (bound_arg, bound)]);
+                            let accepted = evaluate_integer(&ctx, guard, &inputs) != 0;
+                            assert_eq!(
+                                accepted, expected,
+                                "{signedness:?}: first={first}, step={step}, offset={offset}, bound={bound}, factor={factor}, pred={pred:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn full_offset_unroll_preserves_signed_descending_and_high_bit_unsigned_results() {
+    let cases = [
+        (Signedness::Signed, 4, -1, 1, CmpPred::Gt, 0, 10),
+        (Signedness::Signed, -3, 1, -2, CmpPred::Le, 2, 4),
+        (Signedness::Unsigned, 0, 1, 128, CmpPred::Lt, 132, 6),
+    ];
+    for (signedness, start, step, offset, pred, bound, expected) in cases {
+        let mut ctx = mir_ctx();
+        let ty = IntegerType::get(&ctx, 8, signedness);
+        let lp = offset_counted_loop(
+            &mut ctx,
+            ty,
+            start,
+            step,
+            offset,
+            pred,
+            OffsetBound::Const(bound),
+        );
+        unroll_offset_loop(&mut ctx, &lp, 0);
+        assert_eq!(loop_count(&ctx, lp.region), 0);
+        assert_eq!(sole_return_constant(&ctx, lp.region), Some(expected));
+    }
 }
