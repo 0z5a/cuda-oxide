@@ -1,70 +1,12 @@
 /* SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0 */
 
-//! GPU oracle for the four plain (standard-metadata) SM89 sparse FP8 MMA forms:
+//! Checks all four plain SM89 sparse FP8 MMA forms against an exact host GEMM.
 //!
-//! ```text
-//! mma.sp.sync.aligned.m16n8k64.row.col.f32.e4m3.e4m3.f32
-//! mma.sp.sync.aligned.m16n8k64.row.col.f32.e4m3.e5m2.f32
-//! mma.sp.sync.aligned.m16n8k64.row.col.f32.e5m2.e4m3.f32
-//! mma.sp.sync.aligned.m16n8k64.row.col.f32.e5m2.e5m2.f32
-//! ```
-//!
-//! # The fragment contract
-//!
-//! A is 2:4 sparse along K, so it is held **compressed** as 16x32 in four `.b32`
-//! registers; B is the full 64x8 in four `.b32` registers. For lane `l`, with
-//! `g = l/4`, `t = l%4`, register `n` and byte position `i` (byte 0 is the
-//! lowest byte of the register):
-//!
-//! ```text
-//! A: row = g + 8*(n%2)                     compressed col = 4*t + 16*(n/2) + i
-//! B: k   = 16*n + 4*t + i                  col            = g
-//! D: regs {0,1} -> row g,   cols 2*t, 2*t+1
-//!    regs {2,3} -> row g+8, cols 2*t, 2*t+1
-//! metadata: nibble = i0 | i1<<2, the same code in all eight 4-bit groups;
-//!           compressed column 2*q takes dense K 4*q + i0,
-//!           compressed column 2*q+1 takes dense K 4*q + i1
-//! selector = 0
-//! ```
-//!
-//! So the four FP8 values in a register are little-endian: byte `i` is the
-//! lowest-addressed element of the four it covers.
-//!
-//! # How that was determined
-//!
-//! Neither the byte order nor the nibble-to-K-group mapping is documented
-//! anywhere this checkout can reach, so the hardware is the oracle. `--probe`
-//! runs the e4m3/e4m3 form once per candidate wiring -- 13,824 candidates over
-//! six independent axes: which A registers hold row `g+8`, which compressed
-//! columns an A register holds, the A byte order, which K rows a B register
-//! holds, the B byte order, and which of a nibble's two 2-bit fields names the
-//! even compressed column. Every candidate is filled into the registers and
-//! executed; the host compares against an exact integer GEMM that does not
-//! depend on the candidate at all, so a wrong axis changes the sum.
-//!
-//! 32 candidates reproduce the reference bit-for-bit, and they are exactly two
-//! families:
-//!
-//! * `A row = n%2, A band = 16*(n/2), A byte order = i, B band = 16*n,
-//!    B byte order = i` for all twelve legal nibble codes -- 24 entries once
-//!    the field-swap duplicate is removed;
-//! * the same with **both** byte orders reversed and the nibble's fields
-//!    swapped, for two codes only (`0x3`/`0xc` and `0x6`/`0x9`).
-//!
-//! The first family is the wiring: it is the only one that reproduces the
-//! reference for the other ten nibble codes, and the byte-order axis is varied
-//! on its own (reversing A alone or B alone matches nothing). The second
-//! family is a self-compensating alias that exists only for the two nibbles
-//! whose code has the larger index in the low field; the oracle therefore
-//! exercises `0x4`, `0x8` and `0xe` as well, which no byte-order reversal can
-//! reproduce.
-//!
-//! Re-run the sweep with:
-//!
-//! ```text
-//! cargo run -p cargo-oxide -- run sparse_mma_fp8 -- --probe
-//! ```
+//! Each form covers all twelve standard-metadata codes and zero/nonzero C.
+//! Values vary across K bands so swapped fragment registers change the result.
+//! See the PTX ISA's "Matrix Fragments for sparse mma.m16n8k64" for the layout.
+//! `--probe` additionally compares candidate layouts on the current GPU.
 
 use cuda_core::simt::LaunchConfig;
 use cuda_core::{CudaContext, DeviceBuffer};
@@ -73,17 +15,17 @@ use cuda_device::{DisjointSlice, cuda_module, kernel, thread, wmma};
 const M: usize = 16;
 const N: usize = 8;
 const K: usize = 64;
+const METADATA_CODES: usize = 12;
+const VARIANTS: usize = 2 * 4 * METADATA_CODES;
 /// Compressed K: two kept elements per 4-wide group.
 const KC: usize = K / 2;
 
-/// Exactly-checkable operands: every value is an integer in 1..=8, which both
-/// e4m3 and e5m2 represent exactly, and A/B are positionally distinct so any
-/// mis-route changes the sum instead of hiding behind a tolerance.
+/// Small exact integers with distinct K bands expose fragment-order mistakes.
 fn a_val(r: u32, c: u32) -> u32 {
-    1 + (3 * r + 5 * c) % 7
+    1 + (3 * r + 5 * c + c / 16) % 7
 }
 fn b_val(k: u32, n: u32) -> u32 {
-    1 + (2 * k + 3 * n) % 8
+    1 + (2 * k + 3 * n + 5 * (k / 4) + k / 16) % 8
 }
 fn c_val(r: u32, n: u32) -> u32 {
     (5 * r + 7 * n) % 32
@@ -109,30 +51,17 @@ fn f8_bits(v: u32, e4m3: bool) -> u32 {
     }
     let mant = v - (1u32 << e);
     if e4m3 {
-        let sh = if e >= 3 { 0 } else { 3 - e };
+        let sh = 3_u32.saturating_sub(e);
         ((e + 7) << 3) | (mant << sh)
     } else {
-        let sh = if e >= 2 { 0 } else { 2 - e };
+        let sh = 2_u32.saturating_sub(e);
         ((e + 15) << 2) | (mant << sh)
     }
 }
 
-/// The six legal "two distinct positions" metadata codes. `0x0`, `0x5`, `0xa`
-/// and `0xf` are undefined behaviour because their two 2-bit fields are equal.
+/// Standard metadata accepts two distinct 2-bit indices, in either order.
 fn nibble_of(i: u32) -> u32 {
-    if i == 0 {
-        0x4
-    } else if i == 1 {
-        0x6
-    } else if i == 2 {
-        0x8
-    } else if i == 3 {
-        0x9
-    } else if i == 4 {
-        0xc
-    } else {
-        0xe
-    }
+    probe_nibble(i)
 }
 
 #[cuda_module]
@@ -203,7 +132,7 @@ mod kernels {
     }
 
     /// Variant `v` occupies `out[v*128 + lane*4 .. +4]`, with
-    /// `v = nonzero_accumulator*24 + form*6 + metadata_code`.
+    /// `v = nonzero_accumulator*48 + form*12 + metadata_code`.
     #[kernel]
     pub fn oracle(mut out: DisjointSlice<f32>) {
         let l = thread::threadIdx_x();
@@ -219,19 +148,19 @@ mod kernels {
         while acc < 2 {
             let c = if acc == 0 { cz } else { cn };
             let mut ni = 0;
-            while ni < 6 {
+            while ni < METADATA_CODES as u32 {
                 let meta = nibble_of(ni) * 0x1111_1111;
                 let d = unsafe { wmma::mma_sp_m16n8k64_f32_e4m3_e4m3_f32(c, a4, b4, meta, 0) };
                 store(&mut out, base + ni as usize, l, d);
                 let d = unsafe { wmma::mma_sp_m16n8k64_f32_e4m3_e5m2_f32(c, a4, b5, meta, 0) };
-                store(&mut out, base + 6 + ni as usize, l, d);
+                store(&mut out, base + METADATA_CODES + ni as usize, l, d);
                 let d = unsafe { wmma::mma_sp_m16n8k64_f32_e5m2_e4m3_f32(c, a5, b4, meta, 0) };
-                store(&mut out, base + 12 + ni as usize, l, d);
+                store(&mut out, base + 2 * METADATA_CODES + ni as usize, l, d);
                 let d = unsafe { wmma::mma_sp_m16n8k64_f32_e5m2_e5m2_f32(c, a5, b5, meta, 0) };
-                store(&mut out, base + 18 + ni as usize, l, d);
+                store(&mut out, base + 3 * METADATA_CODES + ni as usize, l, d);
                 ni += 1;
             }
-            base += 24;
+            base += 4 * METADATA_CODES;
             acc += 1;
         }
     }
@@ -328,7 +257,7 @@ fn expect(r: usize, col: usize, nibble: u32, acc: bool) -> f32 {
 fn run_oracle(ctx: &std::sync::Arc<CudaContext>) {
     let s = ctx.default_stream();
     let module = kernels::load(ctx).expect("module");
-    let mut out = DeviceBuffer::<f32>::zeroed(&s, 48 * 128).unwrap();
+    let mut out = DeviceBuffer::<f32>::zeroed(&s, VARIANTS * 128).unwrap();
     let cfg = LaunchConfig {
         block_dim: (32, 1, 1),
         grid_dim: (1, 1, 1),
@@ -342,8 +271,8 @@ fn run_oracle(ctx: &std::sync::Arc<CudaContext>) {
     for (form, name) in names.iter().enumerate() {
         for acc in 0..2 {
             let mut form_bad = 0usize;
-            for ni in 0..6u32 {
-                let variant = acc * 24 + form * 6 + ni as usize;
+            for ni in 0..METADATA_CODES as u32 {
+                let variant = (acc * 4 + form) * METADATA_CODES + ni as usize;
                 let nibble = nibble_of(ni);
                 for l in 0..32usize {
                     for j in 0..4usize {
@@ -363,7 +292,7 @@ fn run_oracle(ctx: &std::sync::Arc<CudaContext>) {
                 }
             }
             println!(
-                "  {name:12} {:>7} metadata codes 0x4 0x6 0x8 0x9 0xc 0xe: {} mismatches",
+                "  {name:12} {:>7} all 12 standard metadata codes: {} mismatches",
                 if acc == 1 { "C!=0," } else { "C=0," },
                 form_bad
             );
@@ -372,7 +301,7 @@ fn run_oracle(ctx: &std::sync::Arc<CudaContext>) {
     }
     assert_eq!(bad, 0, "sparse FP8 MMA accumulator mismatches");
     println!(
-        "SUCCESS: all 4 sparse FP8 m16n8k64 forms x 6 metadata codes x C=0/C!=0; \
+        "SUCCESS: all 4 sparse FP8 m16n8k64 forms x 12 metadata codes x C=0/C!=0; \
          all 32 lanes and 4 logical accumulators/lane match host GEMM exactly"
     );
 }
@@ -407,9 +336,7 @@ const B_LAYOUTS: u32 = B_BAND_OPTS * B_ORD_OPTS;
 const META_OPTS: u32 = 12 * META_SWAP_OPTS;
 const COMBOS: u32 = A_LAYOUTS * B_LAYOUTS * META_OPTS;
 
-/// Distinct from the oracle's operands so no single axis can hide behind a
-/// period of the value function: `c/16` makes the A band visible and `k/16`
-/// makes the B band visible.
+/// Separate K-band patterns for the optional layout sweep.
 fn probe_a(r: u32, c: u32) -> u32 {
     1 + (3 * r + 5 * c) % 7 + c / 16
 }
@@ -544,7 +471,7 @@ impl Candidate {
     fn kmap(&self, c: u32) -> u32 {
         let low = self.nib & 3;
         let high = self.nib >> 2;
-        let field = if (c % 2 == 0) == (self.sw == 0) {
+        let field = if c.is_multiple_of(2) == (self.sw == 0) {
             low
         } else {
             high
@@ -657,5 +584,78 @@ fn main() {
         run_probe(&ctx);
     } else {
         run_oracle(&ctx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn operands_round_trip_through_both_fp8_formats() {
+        for e4m3 in [false, true] {
+            let (mantissa_bits, bias) = if e4m3 { (3, 7) } else { (2, 15) };
+            for value in 1..=8 {
+                let bits = f8_bits(value, e4m3);
+                let exponent = (bits >> mantissa_bits) as i32 - bias;
+                let mantissa = bits & ((1 << mantissa_bits) - 1);
+                let decoded =
+                    (1.0 + mantissa as f32 / (1 << mantissa_bits) as f32) * 2.0f32.powi(exponent);
+                assert_eq!(decoded, value as f32);
+            }
+        }
+    }
+
+    #[test]
+    fn metadata_covers_every_distinct_pair() {
+        let mut seen = [false; 16];
+        for index in 0..METADATA_CODES as u32 {
+            let code = nibble_of(index) as usize;
+            assert_ne!(code & 3, code >> 2);
+            assert!(!seen[code]);
+            seen[code] = true;
+        }
+        assert_eq!(seen.iter().filter(|&&present| present).count(), 12);
+    }
+
+    #[test]
+    fn oracle_detects_every_b_register_swap() {
+        for first in 0..4 {
+            for second in first + 1..4 {
+                let mut detected = false;
+                for index in 0..METADATA_CODES as u32 {
+                    let code = nibble_of(index);
+                    for row in 0..M as u32 {
+                        for col in 0..N as u32 {
+                            let mut swapped = 0;
+                            for compressed_k in 0..KC as u32 {
+                                let field = if compressed_k.is_multiple_of(2) {
+                                    code & 3
+                                } else {
+                                    code >> 2
+                                };
+                                let k = 4 * (compressed_k / 2) + field;
+                                let band = k / 16;
+                                let other = if band == first {
+                                    second
+                                } else if band == second {
+                                    first
+                                } else {
+                                    band
+                                };
+                                swapped +=
+                                    a_val(row, compressed_k) * b_val(16 * other + k % 16, col);
+                            }
+                            detected |=
+                                swapped as f32 != expect(row as usize, col as usize, code, false);
+                        }
+                    }
+                }
+                assert!(
+                    detected,
+                    "B registers {first} and {second} are indistinguishable"
+                );
+            }
+        }
     }
 }

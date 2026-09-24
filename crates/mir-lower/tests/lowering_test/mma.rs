@@ -1866,7 +1866,7 @@ fn test_generated_plain_sparse_fp8_m16n8k64_lowers_to_exact_convergent_inline_pt
                 "mma.sp.sync.aligned.m16n8k64.row.col.f32.{a_name}.{b_name}.f32 {{$0, $1, $2, $3}}, {{$8, $9, $10, $11}}, {{$12, $13, $14, $15}}, {{$4, $5, $6, $7}}, $16, $17;"
             );
             assert_eq!(
-                asm.get_attr_inline_asm_template(&ctx)
+                asm.get_attr_llvm_inline_asm_template(&ctx)
                     .as_deref()
                     .map(|value| String::from(value.clone())),
                 Some(expected_template)
@@ -1874,7 +1874,7 @@ fn test_generated_plain_sparse_fp8_m16n8k64_lowers_to_exact_convergent_inline_pt
             // Four f32 outputs, the f32 C fragment, the packed A/B registers,
             // the metadata register and the compile-time selector immediate.
             assert_eq!(
-                asm.get_attr_inline_asm_constraints(&ctx)
+                asm.get_attr_llvm_inline_asm_constraints(&ctx)
                     .as_deref()
                     .map(|value| String::from(value.clone())),
                 Some("=f,=f,=f,=f,f,f,f,f,r,r,r,r,r,r,r,r,r,n".to_string())
