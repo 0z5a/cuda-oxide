@@ -539,6 +539,212 @@ mod tests {
     }
 
     #[test]
+    fn whole_value_load_round_trips_through_carrier_storage() {
+        let mut ctx = make_ctx();
+        let (packed, _, _) = packed_shared_fixture(&mut ctx);
+        let (module, block) = build_kernel(&mut ctx, vec![], vec![]);
+        let slot = append_alloca(&mut ctx, block, packed);
+        let copy_slot = append_alloca(&mut ctx, block, packed);
+        let undef = mir::MirUndefOp::new(&mut ctx, packed);
+        undef.get_operation().insert_at_back(block, &ctx);
+        let value = undef.get_operation().deref(&ctx).get_result(0);
+        let store = Operation::new(
+            &mut ctx,
+            mir::MirStoreOp::get_concrete_op_info(),
+            vec![],
+            vec![slot, value],
+            vec![],
+            0,
+        );
+        store.insert_at_back(block, &ctx);
+        let load = Operation::new(
+            &mut ctx,
+            mir::MirLoadOp::get_concrete_op_info(),
+            vec![packed],
+            vec![slot],
+            vec![],
+            0,
+        );
+        load.insert_at_back(block, &ctx);
+        let loaded = load.deref(&ctx).get_result(0);
+        let copy_store = Operation::new(
+            &mut ctx,
+            mir::MirStoreOp::get_concrete_op_info(),
+            vec![],
+            vec![copy_slot, loaded],
+            vec![],
+            0,
+        );
+        copy_store.insert_at_back(block, &ctx);
+        append_mir_return(&mut ctx, block, vec![]);
+
+        crate::lower_mir_to_llvm(&mut ctx, module).expect("whole-value carrier roundtrip");
+        let body = kernel_blocks(&ctx, module);
+        let alloca = find_first::<llvm::AllocaOp>(&ctx, &body).unwrap();
+        let load = find_first::<llvm::LoadOp>(&ctx, &body).unwrap();
+        let storage_ty = alloca.result_pointee_type(&ctx);
+        assert_eq!(
+            load.get_operation()
+                .deref(&ctx)
+                .get_result(0)
+                .get_type(&ctx),
+            storage_ty
+        );
+        let pointer_ty = storage_ty
+            .deref(&ctx)
+            .downcast_ref::<StructType>()
+            .unwrap()
+            .field_type(1);
+        assert_eq!(
+            pointer_ty
+                .deref(&ctx)
+                .downcast_ref::<PointerType>()
+                .unwrap()
+                .address_space(),
+            llvm_addr::GENERIC
+        );
+        let address_space = |value: Value| {
+            value
+                .get_type(&ctx)
+                .deref(&ctx)
+                .downcast_ref::<PointerType>()
+                .unwrap()
+                .address_space()
+        };
+        let conversions: Vec<_> = find_all::<llvm::AddrSpaceCastOp>(&ctx, &body)
+            .iter()
+            .map(|cast| {
+                let op = cast.get_operation().deref(&ctx);
+                (
+                    address_space(op.get_operand(0)),
+                    address_space(op.get_result(0)),
+                )
+            })
+            .collect();
+        assert_eq!(
+            conversions,
+            [
+                (llvm_addr::SHARED, llvm_addr::GENERIC),
+                (llvm_addr::GENERIC, llvm_addr::SHARED),
+                (llvm_addr::SHARED, llvm_addr::GENERIC),
+            ]
+        );
+    }
+
+    #[test]
+    fn input_cannot_supply_carrier_storage_facts() {
+        for key in [CARRIER_STORAGE_TYPE_KEY, CARRIER_GEP_SOURCE_TYPE_KEY] {
+            let mut ctx = make_ctx();
+            let (packed, _, _) = packed_shared_fixture(&mut ctx);
+            let (module, block) = build_kernel(&mut ctx, vec![], vec![]);
+            let slot = append_alloca(&mut ctx, block, packed);
+            let alloca = slot.defining_op().unwrap();
+            let storage = packed_shared_internal_abi_info(&mut ctx, packed)
+                .unwrap()
+                .unwrap()
+                .storage_ty;
+            set_type_attr(&mut ctx, alloca, key, storage);
+            append_mir_return(&mut ctx, block, vec![]);
+
+            let error = crate::lower_mir_to_llvm(&mut ctx, module)
+                .expect_err("input carrier facts must be rejected");
+            assert!(
+                error.to_string().contains("not supplied by input MIR"),
+                "{error}"
+            );
+            assert!(Operation::get_op::<MirAllocaOp>(alloca, &ctx).is_some());
+        }
+    }
+
+    #[test]
+    fn carrier_address_cannot_be_stored_as_a_value() {
+        let mut ctx = make_ctx();
+        let (packed, _, _) = packed_shared_fixture(&mut ctx);
+        let (module, block) = build_kernel(&mut ctx, vec![], vec![]);
+        let slot = append_alloca(&mut ctx, block, packed);
+        let slot_ty = slot.get_type(&ctx);
+        let address_slot = append_alloca(&mut ctx, block, slot_ty);
+        let store = Operation::new(
+            &mut ctx,
+            mir::MirStoreOp::get_concrete_op_info(),
+            vec![],
+            vec![address_slot, slot],
+            vec![],
+            0,
+        );
+        store.insert_at_back(block, &ctx);
+        append_mir_return(&mut ctx, block, vec![]);
+
+        let error = crate::lower_mir_to_llvm(&mut ctx, module)
+            .expect_err("carrier addresses cannot escape through memory");
+        assert!(
+            error
+                .to_string()
+                .contains("cannot itself be stored as a value"),
+            "{error}"
+        );
+        assert!(carrier_storage_type(&ctx, slot.defining_op().unwrap()).is_none());
+    }
+
+    #[test]
+    fn carrier_address_rejects_nested_zero_sized_projection() {
+        let mut ctx = make_ctx();
+        let (_, tag, shared) = packed_shared_fixture(&mut ctx);
+        let unit: TypeHandle = MirStructType::get_with_full_layout(
+            &mut ctx,
+            "Unit".into(),
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            0,
+            1,
+        )
+        .into();
+        let marker: TypeHandle = MirStructType::get_with_full_layout(
+            &mut ctx,
+            "Marker".into(),
+            vec!["unit".into()],
+            vec![unit],
+            vec![0],
+            vec![0],
+            0,
+            1,
+        )
+        .into();
+        let packed: TypeHandle = MirStructType::get_with_full_layout(
+            &mut ctx,
+            "PackedWithMarker".into(),
+            vec!["marker".into(), "tag".into(), "ptr".into()],
+            vec![marker, tag, shared],
+            vec![0, 1, 2],
+            vec![0, 0, 1],
+            9,
+            1,
+        )
+        .into();
+        let (module, block) = build_kernel(&mut ctx, vec![], vec![]);
+        let slot = append_alloca(&mut ctx, block, packed);
+        let marker_ptr: TypeHandle = MirPtrType::get_generic(&mut ctx, marker, true).into();
+        let first = mir::MirFieldAddrOp::build(&mut ctx, slot, marker_ptr, 0).unwrap();
+        first.insert_at_back(block, &ctx);
+        let marker_address = first.deref(&ctx).get_result(0);
+        let unit_ptr: TypeHandle = MirPtrType::get_generic(&mut ctx, unit, true).into();
+        let nested = mir::MirFieldAddrOp::build(&mut ctx, marker_address, unit_ptr, 0).unwrap();
+        nested.insert_at_back(block, &ctx);
+        append_mir_return(&mut ctx, block, vec![]);
+
+        let error = crate::lower_mir_to_llvm(&mut ctx, module)
+            .expect_err("nested carrier projections must fail even through ZSTs");
+        assert!(
+            error.to_string().contains("nested carrier projections"),
+            "{error}"
+        );
+        assert!(carrier_storage_type(&ctx, slot.defining_op().unwrap()).is_none());
+        assert!(carrier_gep_source_type(&ctx, first).is_none());
+    }
+
+    #[test]
     fn carrier_address_rejects_cast_escape() {
         let mut ctx = make_ctx();
         let (packed, _, _) = packed_shared_fixture(&mut ctx);
