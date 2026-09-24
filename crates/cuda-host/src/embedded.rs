@@ -162,10 +162,7 @@ pub fn merge_ptx_bundles<'a>(
     let mut merged = String::new();
     let mut found_any = false;
 
-    // Debug `.file` indices are per-module sequence numbers starting at 1,
-    // so concatenated lineinfo/debug bundles redeclare each other's indices
-    // and ptxas rejects the module ("Duplicate file index"). Each appended
-    // bundle's indices are shifted past the running maximum (#1292).
+    // Keep each bundle's debug file indices distinct in the merged module.
     let mut file_index_offset = 0;
 
     for bundle in bundles {
@@ -199,14 +196,8 @@ pub fn merge_ptx_bundles<'a>(
     Ok(merged)
 }
 
-/// Rewrite one bundle's PTX for concatenation: strip the per-file header
-/// directives (`.version`/`.target`/`.address_size`) unless this is the first
-/// bundle, and shift every debug file index (`.file` declarations, `.loc`
-/// references, and `.loc ... inlined_at` references) by `file_index_offset`.
-///
-/// Returns the rewritten text and the highest file index it declares or
-/// references after shifting, so the caller can offset the next bundle past
-/// it. Bundles without debug info report `0` and are unaffected.
+/// Strip repeated headers and shift debug indices past the previous bundles.
+/// Returns the rewritten text and its highest debug file index.
 fn prepare_bundle_body(
     ptx: &str,
     strip_headers: bool,
@@ -223,30 +214,34 @@ fn prepare_bundle_body(
                     .delete(directive.line_span())
                     .map_err(|error| error.to_string())?;
             }
-            // `.file <index> "path"[, timestamp, size]`
-            ".file" => {
+            ".file" | ".loc" => {
+                let span = directive.arguments_span();
+                let tokens = document.tokens();
+                let first = tokens.partition_point(|token| token.span().end <= span.start);
+                let arguments: Vec<_> = tokens[first..]
+                    .iter()
+                    .take_while(|token| token.span().start < span.end)
+                    .filter(|token| !token.kind().is_trivia())
+                    .collect();
                 let index = shift_file_index(
                     &mut edits,
-                    directive.arguments(),
-                    directive.arguments_span().start,
-                    0,
+                    ptx,
+                    arguments.first().copied(),
                     file_index_offset,
                 )?;
                 max_file_index = max_file_index.max(index);
-            }
-            // `.loc <index> <line> <column>[, function_name f, inlined_at
-            // <index> <line> <column>]` — both indices reference the file
-            // table and both must move with it.
-            ".loc" => {
-                let arguments = directive.arguments();
-                let base = directive.arguments_span().start;
-                let index = shift_file_index(&mut edits, arguments, base, 0, file_index_offset)?;
-                max_file_index = max_file_index.max(index);
-                if let Some(position) = arguments.find("inlined_at") {
-                    let after = position + "inlined_at".len();
-                    let index =
-                        shift_file_index(&mut edits, arguments, base, after, file_index_offset)?;
-                    max_file_index = max_file_index.max(index);
+                if directive.name() == ".loc" {
+                    for (position, attribute) in arguments.windows(2).enumerate() {
+                        if attribute[0].text(ptx) == "," && attribute[1].text(ptx) == "inlined_at" {
+                            let index = shift_file_index(
+                                &mut edits,
+                                ptx,
+                                arguments.get(position + 2).copied(),
+                                file_index_offset,
+                            )?;
+                            max_file_index = max_file_index.max(index);
+                        }
+                    }
                 }
             }
             _ => {}
@@ -257,37 +252,28 @@ fn prepare_bundle_body(
     Ok((body, max_file_index))
 }
 
-/// Replace the first integer at or after `from` in `arguments` with itself
-/// plus `offset`, recording the edit against the whole document (arguments
-/// start at document offset `base`). Returns the shifted value.
+/// Shift one complete decimal index token, preserving surrounding PTX.
 fn shift_file_index(
     edits: &mut ptx_parse::EditScript,
-    arguments: &str,
-    base: usize,
-    from: usize,
+    ptx: &str,
+    token: Option<&ptx_parse::Token>,
     offset: u64,
 ) -> Result<u64, String> {
-    let bytes = arguments.as_bytes();
-    let mut start = from;
-    while start < bytes.len() && !bytes[start].is_ascii_digit() {
-        start += 1;
+    let token = token.ok_or("malformed debug directive: missing file index")?;
+    let text = token.text(ptx);
+    if token.kind() != ptx_parse::TokenKind::Word || !text.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return Err(format!("malformed debug file index: {text:?}"));
     }
-    let mut end = start;
-    while end < bytes.len() && bytes[end].is_ascii_digit() {
-        end += 1;
-    }
-    if start == end {
-        return Err(format!(
-            "malformed debug directive: no file index in {arguments:?}"
-        ));
-    }
-    let index: u64 = arguments[start..end]
+    let index: u64 = text
         .parse()
-        .map_err(|_| format!("debug file index out of range in {arguments:?}"))?;
-    let shifted = index + offset;
+        .map_err(|_| format!("debug file index out of range: {text:?}"))?;
+    let shifted = index
+        .checked_add(offset)
+        .ok_or("debug file index overflow")?;
     if offset != 0 {
         edits
-            .replace(base + start..base + end, shifted.to_string())
+            .replace(token.span(), shifted.to_string())
             .map_err(|error| error.to_string())?;
     }
     Ok(shifted)
@@ -473,10 +459,37 @@ mod tests {
         assert_eq!(max_file_index, 0);
     }
 
-    /// Debug file indices are per-module, so each appended bundle's `.file`
-    /// declarations and `.loc` references (including `inlined_at`) must shift
-    /// past the running maximum, or ptxas rejects the merged module with
-    /// "Duplicate file index" (#1292). The first bundle keeps its indices.
+    #[test]
+    fn debug_indices_ignore_comments_paths_and_label_substrings() {
+        let ptx = ".file /* 90 */ 1 \"source12.rs\"\n.loc /* 80 */ 1 2 3, function_name $inlined_at7, inlined_at /* 70 */ 1 4 5 // inlined_at 60\n";
+        let (body, max_index) = prepare_bundle_body(ptx, false, 3).unwrap();
+        assert_eq!(
+            body,
+            ".file /* 90 */ 4 \"source12.rs\"\n.loc /* 80 */ 4 2 3, function_name $inlined_at7, inlined_at /* 70 */ 4 4 5 // inlined_at 60\n"
+        );
+        assert_eq!(max_index, 4);
+    }
+
+    #[test]
+    fn malformed_debug_indices_and_overflow_return_errors() {
+        for ptx in [
+            ".file \"source12.rs\"\n",
+            ".file /* 12 */\n",
+            ".file -1 \"source.rs\"\n",
+            ".file 1foo \"source.rs\"\n",
+            ".loc 1 2 3, inlined_at\n",
+            ".loc 1 2 3, inlined_at -1 4 5\n",
+            ".file 18446744073709551616 \"source.rs\"\n",
+        ] {
+            assert!(prepare_bundle_body(ptx, false, 1).is_err(), "{ptx}");
+        }
+        assert!(
+            prepare_bundle_body(".file 18446744073709551615 \"source.rs\"\n", false, 1)
+                .unwrap_err()
+                .contains("overflow")
+        );
+    }
+
     #[test]
     fn merged_bundles_renumber_debug_file_indices_per_bundle() {
         let first = ptx_bundle(
