@@ -7,9 +7,10 @@
 //! through an unbounded raw pointer. Procfs supplies the mapped file's identity;
 //! metadata validation and artifact reads use the same open file description.
 
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read};
-use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
 #[derive(Debug)]
@@ -81,6 +82,37 @@ fn mapping_at<'a>(maps: &'a [u8], address: usize) -> io::Result<Mapping<'a>> {
     ))
 }
 
+fn mapped_identity_matches(file: &File, mapping: &Mapping<'_>) -> io::Result<bool> {
+    // SAFETY: the descriptor stays open and no references to the mapping are created.
+    let address = unsafe {
+        libc::mmap(
+            std::ptr::null_mut(),
+            1,
+            libc::PROT_NONE,
+            libc::MAP_PRIVATE,
+            file.as_raw_fd(),
+            0,
+        )
+    };
+    if address == libc::MAP_FAILED {
+        return Err(io::Error::last_os_error());
+    }
+    let result = fs::read("/proc/self/maps").and_then(|maps| {
+        let probe = mapping_at(&maps, address.addr())?;
+        if (probe.major, probe.minor, probe.inode) != (mapping.major, mapping.minor, mapping.inode)
+        {
+            return Ok(false);
+        }
+        // Btrfs subvolumes can share procfs device and inode numbers.
+        let map_files = Path::new("/proc/self/map_files");
+        Ok(fs::read_link(map_files.join(probe.range))?
+            == fs::read_link(map_files.join(mapping.range))?)
+    });
+    // SAFETY: this releases only the successful mapping above, including on read errors.
+    unsafe { libc::munmap(address, 1) };
+    result
+}
+
 fn read_verified(path: &Path, mapping: &Mapping<'_>) -> io::Result<Vec<u8>> {
     // A pathname can change after map_files was read. Avoid blocking on a
     // replaced FIFO before its type and identity can be checked below.
@@ -88,12 +120,8 @@ fn read_verified(path: &Path, mapping: &Mapping<'_>) -> io::Result<Vec<u8>> {
         .read(true)
         .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
         .open(path)?;
-    let metadata = file.metadata()?;
-    if !metadata.is_file()
-        || metadata.ino() != mapping.inode
-        || u64::from(libc::major(metadata.dev())) != mapping.major
-        || u64::from(libc::minor(metadata.dev())) != mapping.minor
-    {
+    // Compare both file identities through procfs; stat can report different IDs.
+    if !file.metadata()?.is_file() || !mapped_identity_matches(&file, mapping)? {
         return Err(invalid(
             "artifact image no longer identifies the mapped file",
         ));
@@ -120,6 +148,7 @@ mod tests {
     use oxide_artifacts::{ArtifactBundleSpec, ArtifactPayloadKind, ArtifactPayloadSpec};
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::MetadataExt;
     use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -160,6 +189,28 @@ mod tests {
     }
 
     #[test]
+    fn opened_file_mapping_preserves_device_and_inode_checks() {
+        static ANCHOR: u8 = 0;
+        let maps = fs::read("/proc/self/maps").unwrap();
+        let mut mapping = mapping_at(&maps, std::ptr::from_ref(&ANCHOR).addr()).unwrap();
+        let path = std::env::current_exe().unwrap();
+        let file = File::open(&path).unwrap();
+        assert!(mapped_identity_matches(&file, &mapping).unwrap());
+        mapping.major ^= 1;
+        assert!(!mapped_identity_matches(&file, &mapping).unwrap());
+        assert_eq!(
+            read_verified(&path, &mapping).unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
+        mapping.major ^= 1;
+        mapping.minor ^= 1;
+        assert!(!mapped_identity_matches(&file, &mapping).unwrap());
+        mapping.minor ^= 1;
+        mapping.inode ^= 1;
+        assert!(!mapped_identity_matches(&file, &mapping).unwrap());
+    }
+
+    #[test]
     fn shared_library_discovery() {
         const CHILD: &str = "CUDA_OXIDE_MAPPED_IMAGE_TEST";
         if let Ok(mode) = std::env::var(CHILD) {
@@ -175,6 +226,24 @@ mod tests {
                 "changed-directory" => std::env::set_current_dir("..").unwrap(),
                 "renamed" => fs::rename(path, "renamed.so").unwrap(),
                 "deleted" => fs::remove_file(path).unwrap(),
+                "replaced" => {
+                    let maps = fs::read("/proc/self/maps").unwrap();
+                    let mut mapping = mapping_at(&maps, std::ptr::from_ref(anchor).addr()).unwrap();
+                    fs::rename(path, "replaced.so").unwrap();
+                    fs::copy("fixture.so", path).unwrap();
+                    assert_eq!(
+                        read_verified(path, &mapping).unwrap_err().kind(),
+                        io::ErrorKind::InvalidData
+                    );
+                    let replacement = File::open(path).unwrap();
+                    // Simulate equal inode numbers in distinct Btrfs subvolumes.
+                    mapping.inode = replacement.metadata().unwrap().ino();
+                    assert!(!mapped_identity_matches(&replacement, &mapping).unwrap());
+                    assert!(matches!(
+                        read_verified(path, &mapping),
+                        Err(error) if error.kind() == io::ErrorKind::InvalidData
+                    ));
+                }
                 "relative" => {}
                 _ => panic!("unknown test mode"),
             }
@@ -242,7 +311,13 @@ mod tests {
             "{}",
             String::from_utf8_lossy(&built.stderr)
         );
-        for mode in ["relative", "changed-directory", "renamed", "deleted"] {
+        for mode in [
+            "relative",
+            "changed-directory",
+            "renamed",
+            "deleted",
+            "replaced",
+        ] {
             fs::copy(
                 dir.join("fixture.so"),
                 dir.join(OsStr::from_bytes(b"plugin space\\name\nline\xff.so")),
