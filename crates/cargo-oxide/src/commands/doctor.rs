@@ -14,6 +14,23 @@ use super::*;
 // Doctor command
 // =============================================================================
 
+/// Find the first compiler that can report a non-empty resource directory.
+/// Probe the required operation directly: `--version` alone does not establish
+/// that a wrapper or incomplete installation can answer this query.
+pub(super) fn clang_resource_dir<'a>(candidates: &[&'a str]) -> Option<(&'a str, String)> {
+    candidates.iter().find_map(|&name| {
+        let output = Command::new(name)
+            .arg("-print-resource-dir")
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        (!dir.is_empty()).then_some((name, dir))
+    })
+}
+
 /// Parsed contents of a `rust-toolchain.toml` pin.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct RustToolchainPin {
@@ -678,28 +695,26 @@ pub fn doctor(ctx: &Context) {
     // leave `/usr/lib/clang/*/include` empty and bindgen explodes with a
     // mysterious "'stddef.h' file not found". Catch that up front.
     print!("clang / libclang resource dir... ");
-    let clang_resource_dir = Command::new("clang")
-        .arg("-print-resource-dir")
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
-    match clang_resource_dir {
-        Some(ref dir) if std::path::Path::new(&format!("{}/include/stddef.h", dir)).exists() => {
-            println!("✓ {}", dir);
+    let clangs = [
+        "clang", "clang-22", "clang-21", "clang-20", "clang-19", "clang-18", "clang-17",
+        "clang-16", "clang-15",
+    ];
+
+    match clang_resource_dir(&clangs) {
+        Some((name, ref dir))
+            if std::path::Path::new(&format!("{}/include/stddef.h", dir)).exists() =>
+        {
+            println!("✓ {dir} (via {name})");
         }
-        Some(ref dir) => {
-            println!(
-                "✗ resource dir present but `include/stddef.h` missing: {}",
-                dir
-            );
+        Some((name, ref dir)) => {
+            println!("✗ resource dir present but `include/stddef.h` missing: {dir} (via {name})");
             eprintln!("  Host `cuda-bindings` uses bindgen, which needs clang's own stddef.h.");
             eprintln!("  Install the matching dev headers: sudo apt install clang-21");
             eprintln!("  (or libclang-common-21-dev)");
             ok = false;
         }
         None => {
-            println!("✗ clang not found");
+            println!("✗ no clang could report its resource directory");
             eprintln!(
                 "  Host `cuda-bindings` uses bindgen, which needs clang + its resource headers."
             );
