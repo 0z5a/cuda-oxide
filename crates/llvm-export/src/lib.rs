@@ -549,25 +549,6 @@ pub mod ops {
     const LLVM_INLINE_ASM_SIDEEFFECT_KEY: &str = "llvm_inline_asm_side_effects";
     const LLVM_INLINE_ASM_ATTRS_KEY: &str = "llvm_inline_asm_attrs";
 
-    /// Op-attribute key marking a function declaration or call as non-returning.
-    const OP_NORETURN_KEY: &str = "cuda_oxide_op_noreturn";
-
-    /// Mark an LLVM function declaration or call as non-returning.
-    pub fn set_op_noreturn(ctx: &mut Context, op: Ptr<Operation>) {
-        let key = Identifier::try_new(OP_NORETURN_KEY.to_string()).expect("valid identifier");
-        op.deref_mut(ctx).attributes.set(key, BoolAttr::new(true));
-    }
-
-    /// Return whether an LLVM function declaration or call is non-returning.
-    pub fn op_noreturn(ctx: &Context, op: Ptr<Operation>) -> bool {
-        let key = Identifier::try_new(OP_NORETURN_KEY.to_string()).expect("valid identifier");
-        op.deref(ctx)
-            .attributes
-            .get::<BoolAttr>(&key)
-            .map(|attr| bool::from((*attr).clone()))
-            .unwrap_or(false)
-    }
-
     /// Debug type metadata for a local variable described by `llvm.dbg.declare`.
     #[derive(Clone, Debug, Eq, Hash, PartialEq)]
     pub enum DebugLocalTypeKind {

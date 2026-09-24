@@ -1537,7 +1537,7 @@ impl<'a> ModuleExportState<'a> {
         output: &mut String,
     ) -> Result<(), String> {
         let op_ref = op.get_operation().deref(self.ctx);
-        let is_noreturn = crate::ops::op_noreturn(self.ctx, op.get_operation());
+        let llvm_call_attrs = op.get_attr_llvm_call_attrs(self.ctx);
         let callee = op.callee(self.ctx);
         let func_ty = op.callee_type(self.ctx);
         let func_ty_ref = func_ty.deref(self.ctx);
@@ -1745,8 +1745,11 @@ impl<'a> ModuleExportState<'a> {
         // performs a barrier / shuffle / vote, `opt -O2` must not sink or
         // duplicate the call across divergent control flow. opt strips the
         // attribute from calls it proves never reach a convergent op.
-        let noreturn_attr = if is_noreturn { " noreturn" } else { "" };
-        writeln!(output, "){noreturn_attr} #0").unwrap();
+        write!(output, ")").unwrap();
+        if let Some(attrs) = llvm_call_attrs.as_deref() {
+            self.export_llvm_attributes(attrs, output)?;
+        }
+        writeln!(output, " #0").unwrap();
         self.convergent_used = true;
 
         if normalize_pointer_result {
