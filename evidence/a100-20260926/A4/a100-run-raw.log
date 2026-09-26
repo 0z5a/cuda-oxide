@@ -1,0 +1,108 @@
+### list
+      "title": "wgmma_mma_bf16"
+    }
+  ],
+  "schema_version": 1
+}
+### build sm_80
+   Compiling regex-automata v0.4.18
+   Compiling syn v2.0.119
+   Compiling syn v3.0.6
+   Compiling block-buffer v0.10.4
+   Compiling crypto-common v0.1.7
+   Compiling digest v0.10.7
+   Compiling sha2 v0.10.9
+   Compiling which v4.4.2
+   Compiling cexpr v0.6.0
+   Compiling regex v1.13.1
+   Compiling thiserror-impl v2.0.21
+   Compiling serde_derive v1.0.229
+   Compiling oxide-artifacts v0.2.1
+   Compiling libnvvm-sys v0.2.1 (/workspace/0z5a/cuda-oxide/crates/libnvvm-sys)
+   Compiling nvjitlink-sys v0.2.1 (/workspace/0z5a/cuda-oxide/crates/nvjitlink-sys)
+   Compiling cuda-artifact-finalizer v0.2.1 (/workspace/0z5a/cuda-oxide/crates/cuda-artifact-finalizer)
+   Compiling zerocopy-derive v0.8.59
+   Compiling cuda-macros v0.2.1 (/workspace/0z5a/cuda-oxide/crates/cuda-macros)
+   Compiling cuda-core-derive v0.3.1
+   Compiling cuda-bindings v0.3.1
+   Compiling half v2.7.1
+   Compiling cuda-device v0.2.1 (/workspace/0z5a/cuda-oxide/crates/cuda-device)
+   Compiling cuda-host v0.2.1 (/workspace/0z5a/cuda-oxide/crates/cuda-host)
+   Compiling redux_shift_regression v0.1.0 (/workspace/0z5a/cuda-oxide/crates/rustc-codegen-cuda/examples/redux_shift_regression)
+    Finished `release` profile [optimized] target(s) in 25.07s
+### run sm_80
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+     Running `target/debug/cargo-oxide run redux_shift_regression --arch sm_80`
+Building rustc-codegen-cuda backend...
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.08s
+✓ Backend built: /workspace/0z5a/cuda-oxide/crates/rustc-codegen-cuda/target/x86_64-unknown-linux-gnu/debug/librustc_codegen_cuda.so
+=========================================
+RUSTC-CODEGEN-CUDA: redux_shift_regression
+=========================================
+
+This is the proper cargo workflow:
+  CARGO_ENCODED_RUSTFLAGS=<cuda-oxide flags> cargo run
+
+Building and running redux_shift_regression...
+
+   Compiling redux_shift_regression v0.1.0 (/workspace/0z5a/cuda-oxide/crates/rustc-codegen-cuda/examples/redux_shift_regression)
+    Finished `release` profile [optimized] target(s) in 0.96s
+     Running `target/release/redux_shift_regression`
+--- Test 1: redux.sync.max.u32 << and >> ---
+✓ ramp: << matches host for all 128 lanes
+✓ ramp: >> is logical for all 128 lanes
+✓ extremes: << matches host for all 128 lanes
+✓ extremes: >> is logical for all 128 lanes
+✓ random: << matches host for all 128 lanes
+✓ random: >> is logical for all 128 lanes
+
+--- Test 2: redux.sync.min.s32 >> ---
+✓ signed >> is arithmetic for all 128 lanes
+
+--- Test 3: wrapping_shl with counts >= 32 ---
+✓ counts 32/33/63 mask to 0/1/31 for all 128 lanes
+
+SUCCESS: shifted warp reductions match the host on all lanes
+### sanitize memcheck
+========= COMPUTE-SANITIZER
+--- Test 1: redux.sync.max.u32 << and >> ---
+✓ ramp: << matches host for all 128 lanes
+✓ ramp: >> is logical for all 128 lanes
+✓ extremes: << matches host for all 128 lanes
+✓ extremes: >> is logical for all 128 lanes
+✓ random: << matches host for all 128 lanes
+✓ random: >> is logical for all 128 lanes
+
+--- Test 2: redux.sync.min.s32 >> ---
+✓ signed >> is arithmetic for all 128 lanes
+
+--- Test 3: wrapping_shl with counts >= 32 ---
+✓ counts 32/33/63 mask to 0/1/31 for all 128 lanes
+
+SUCCESS: shifted warp reductions match the host on all lanes
+========= ERROR SUMMARY: 0 errors
+
+Compute Sanitizer completed with exit code 0.
+Inspect the sanitizer report above; exit status alone is not a clean-report assertion.
+### sanitize synccheck
+========= COMPUTE-SANITIZER
+--- Test 1: redux.sync.max.u32 << and >> ---
+✓ ramp: << matches host for all 128 lanes
+✓ ramp: >> is logical for all 128 lanes
+✓ extremes: << matches host for all 128 lanes
+✓ extremes: >> is logical for all 128 lanes
+✓ random: << matches host for all 128 lanes
+✓ random: >> is logical for all 128 lanes
+
+--- Test 2: redux.sync.min.s32 >> ---
+✓ signed >> is arithmetic for all 128 lanes
+
+--- Test 3: wrapping_shl with counts >= 32 ---
+✓ counts 32/33/63 mask to 0/1/31 for all 128 lanes
+
+SUCCESS: shifted warp reductions match the host on all lanes
+========= ERROR SUMMARY: 0 errors
+
+Compute Sanitizer completed with exit code 0.
+Inspect the sanitizer report above; exit status alone is not a clean-report assertion.
+=== A4_RUN_DONE ===

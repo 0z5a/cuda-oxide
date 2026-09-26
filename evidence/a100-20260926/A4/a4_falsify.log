@@ -1,0 +1,40 @@
+Preparing worktree (detached HEAD ec4aa479)
+HEAD is now at ec4aa479 Merge pull request #1327 from uurl/fix/packed-as3-local-storage-contract
+reverted convert_type in convert_redux (pre-#1264 behaviour)
+### running the new regression test against the reverted lowering
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: `mir-lower` (lib) generated 1 warning (run `cargo fix --lib -p mir-lower` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 37.91s
+     Running tests/lowering_test/main.rs (target/debug/build/mir-lower/bdf7a6103d7a92b4/out/lowering_test-bdf7a6103d7a92b4)
+
+running 5 tests
+test shift_representation::matching_count_width_is_masked_without_a_cast ... ok
+test shift_representation::redux_max_u32_shift_lowers ... FAILED
+test shift_representation::shift_count_mask_shares_the_shift_operand_type ... FAILED
+test shift_representation::shift_count_widths_convert_in_the_documented_direction ... ok
+test shift_representation::right_shift_selects_arithmetic_or_logical_from_mir_signedness ... ok
+
+failures:
+
+---- shift_representation::redux_max_u32_shift_lowers stdout ----
+
+thread 'shift_representation::redux_max_u32_shift_lowers' (27430) panicked at crates/mir-lower/tests/lowering_test/shift_representation.rs:179:10:
+lowered module must verify: Error { kind: VerificationFailed, err: LargerThanOperand, loc: Unknown, backtrace: <disabled> }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- shift_representation::shift_count_mask_shares_the_shift_operand_type stdout ----
+
+thread 'shift_representation::shift_count_mask_shares_the_shift_operand_type' (27432) panicked at crates/mir-lower/tests/lowering_test/shift_representation.rs:179:10:
+lowered module must verify: Error { kind: VerificationFailed, err: LargerThanOperand, loc: Unknown, backtrace: <disabled> }
+
+
+failures:
+    shift_representation::redux_max_u32_shift_lowers
+    shift_representation::shift_count_mask_shares_the_shift_operand_type
+
+test result: FAILED. 3 passed; 2 failed; 0 ignored; 0 measured; 147 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `-p mir-lower --test lowering_test`
+=== FALSIFY_DONE ===
