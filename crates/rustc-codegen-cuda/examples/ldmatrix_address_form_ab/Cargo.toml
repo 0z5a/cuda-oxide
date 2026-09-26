@@ -1,0 +1,18 @@
+[package]
+name = "ldmatrix_address_form_ab"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+# Mark as standalone crate (not part of parent workspace)
+[workspace]
+
+# #1235 / G1: load the same shared tile through the pointer form and the
+# `.shared::cta.u32` form in one kernel and compare the fragments.
+#   cargo oxide run ldmatrix_address_form_ab --arch sm_80
+
+[dependencies]
+cuda-intrinsics = { path = "../../../cuda-intrinsics" }
+cuda-device = { path = "../../../cuda-device" }
+cuda-host = { path = "../../../cuda-host" }
+cuda-core = "0.3.1"
