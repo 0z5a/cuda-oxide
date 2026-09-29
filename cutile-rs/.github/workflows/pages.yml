@@ -1,0 +1,60 @@
+---
+name: pages
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Fetch docs refs
+        run: git fetch origin main --tags
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: cutile-book/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r cutile-book/requirements.txt
+
+      - name: Build book
+        env:
+          CUTILE_DOCS_MAIN_REF: origin/main
+          CUTILE_DOCS_BASE_URL: /cutile-rs/
+        run: scripts/build_versioned_book.sh
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
