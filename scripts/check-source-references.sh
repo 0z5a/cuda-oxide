@@ -57,6 +57,11 @@
 #     is stated rather than papered over -- telling `rvalue.rs` in prose from
 #     any other mention of it is guesswork, and a guard that guesses is worse
 #     than one that is narrow.
+#   * Prose under `cutile-rs/` is written for that tree's root. A `scripts/`
+#     reference there means `cutile-rs/scripts/`, not this repository's
+#     `scripts/` root. Only that prefix is rewritten, and only for files
+#     already under `cutile-rs/`. Oxide prose that names `scripts/run_all.sh`
+#     still fails, because that file is not at the Oxide root.
 set -euo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
@@ -162,6 +167,14 @@ def references(filename, text):
                 yield lineno, path
 
 
+def checked_references(filename, text):
+    # See the cutile-rs note in the header. Rewrite only this one anchor.
+    for lineno, path in references(filename, text):
+        if filename.startswith("cutile-rs/") and path.startswith("scripts/"):
+            path = "cutile-rs/" + path
+        yield lineno, path
+
+
 def broken_references(refs, tracked, generated):
     for lineno, path in refs:
         if ".." in path.split("/"):
@@ -245,6 +258,21 @@ with tempfile.NamedTemporaryFile(prefix="zz-source-reference-", suffix=".rs", di
     seen = {path for _, path in references("case.md", f"[output]:{output}")}
     if list(declaration_errors({output}, tracked, seen)):
         sys.exit("error: generated-output self-test missed a reference definition")
+    nested_script = "cutile-rs/scripts/run_all.sh"
+    if nested_script not in tracked:
+        sys.exit(f"error: source-reference guard self-test expected {nested_script} to be tracked")
+    nested_text = f"`{nested_script[len('cutile-rs/'):]}`"
+    if list(broken_references(checked_references("cutile-rs/README.md", nested_text), tracked, generated)):
+        sys.exit("error: source-reference guard self-test rejected a cutile-rs scripts reference")
+    missing_nested = "scripts/no-such-source-reference-file.sh"
+    if list(broken_references(checked_references("cutile-rs/README.md", f"`{missing_nested}`"), tracked, generated)) != [
+        (1, "cutile-rs/" + missing_nested, "is not tracked in this repository")
+    ]:
+        sys.exit("error: source-reference guard self-test missed a broken cutile-rs scripts reference")
+    if list(broken_references(checked_references("README.md", f"`scripts/run_all.sh`"), tracked, generated)) != [
+        (1, "scripts/run_all.sh", "is not tracked in this repository")
+    ]:
+        sys.exit("error: source-reference guard self-test accepted an Oxide-root scripts/run_all.sh reference")
 
 checked = 0
 broken = []
@@ -252,7 +280,7 @@ referenced = set()
 for filename in sorted(tracked):
     if pathlib.PurePosixPath(filename).suffix not in (".md", ".rs"):
         continue
-    refs = list(references(filename, pathlib.Path(filename).read_text(encoding="utf-8")))
+    refs = list(checked_references(filename, pathlib.Path(filename).read_text(encoding="utf-8")))
     referenced.update(path for _, path in refs)
     checked += len({path for _, path in refs})
     broken.extend(

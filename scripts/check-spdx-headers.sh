@@ -27,12 +27,16 @@
 # #835 did for shell scripts. Every one of the eight passes unchanged, so this
 # only closes the hole.
 #
-# Two kinds of files are deliberately not held to the standard header:
+# Three kinds of files are deliberately not held to the standard header:
 #
 #   * crates/fuzzer/rustlantis/** is embedded third-party code (attributed in
 #     THIRD_PARTY_NOTICES). Its files keep their upstream form; adding an
 #     NVIDIA copyright line to code we do not own would be wrong, so the whole
 #     subtree is out of scope.
+#   * cutile-rs/** is a nested import of a separate product. Its sources keep
+#     the headers that tree already uses; do not rewrite them to the Oxide
+#     Apache-2.0 pair. Drop the `cutile-rs/` grep below when Oxide should
+#     require that header on this path again.
 #   * The two CUTLASS-derived benchmark helpers below carry a plain copyright
 #     line plus `SPDX-License-Identifier: BSD-3-Clause`, reviewed and accepted
 #     as-is by the OSRB. They are exempt from the Apache-2.0 header but must
@@ -111,6 +115,7 @@ while IFS= read -r f; do
     fi
 done < <(git ls-files -- '*.rs' '*.sh' '*.py' '*.cu' '*.c' '*.h' '*.ll' \
     '*.js' '*.css' '*.html' '*.nix' |
+    grep -v '^cutile-rs/' |
     grep -v '^crates/fuzzer/rustlantis/' |
     grep -vxF -f <(printf '%s\n' "${BSD_EXEMPT_FILES[@]}"))
 

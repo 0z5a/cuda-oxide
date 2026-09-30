@@ -160,9 +160,17 @@ if [[ -z "${all_workspace_roots}" ]]; then
     exit 1
 fi
 
+# Nested cutile-rs is a separate product (own deny.toml / notices). Oxide's
+# CSV does not inventory it yet, and .github/workflows/cargo-deny.yml leaves
+# its roots out of the policy half for the same reason. When that changes,
+# drop the CUTILE_ROOT filter below and add each cutile-rs `[workspace]` root
+# to FIRST_PARTY_WORKSPACE_ROOTS (or VENDORED_WORKSPACE_ROOTS if it should
+# stay out of the CSV).
+CUTILE_ROOT=cutile-rs
 on_disk_roots="$(
     printf '%s\n' "${all_workspace_roots}" |
         grep -v "^${EXAMPLES_ROOT}/" |
+        grep -v "^${CUTILE_ROOT}/" |
         LC_ALL=C sort
 )"
 named_roots="$(
