@@ -47,7 +47,7 @@ jobs:
       # stops with "cannot update the lock file". The other two runs below and
       # in cuda-oxide/scripts/ already pass it.
       - name: Run cargo-deny
-        run: cargo deny --config cuda-oxide/deny.toml --locked check
+        run: cargo deny --locked check --config cuda-oxide/deny.toml
 
       # cuda-oxide/crates/rustc-codegen-cuda carries its own `[workspace]` for the
       # rustc-private dylibs, so the run above stops at that boundary and never

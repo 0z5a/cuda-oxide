@@ -117,9 +117,7 @@ use crate::backend_source::{self, DependencySource};
 pub fn find_workspace_root() -> Option<PathBuf> {
     let mut dir = std::env::current_dir().ok()?;
     loop {
-        if dir.join("Cargo.toml").is_file()
-            && (dir.join("crates/rustc-codegen-cuda").is_dir()
-                || dir.join("cuda-oxide/crates/rustc-codegen-cuda").is_dir())
+        if dir.join("Cargo.toml").is_file() && codegen_crate_path(&dir).join("Cargo.toml").is_file()
         {
             return Some(dir);
         }
@@ -131,17 +129,12 @@ pub fn find_workspace_root() -> Option<PathBuf> {
 
 /// Returns a SIMT crate in either supported repository layout.
 pub fn simt_crate_path(workspace_root: &Path, crate_name: &str) -> PathBuf {
-    let nested_crates = workspace_root.join("cuda-oxide/crates");
-    if nested_crates.is_dir() {
-        nested_crates.join(crate_name)
-    } else {
-        workspace_root.join("crates").join(crate_name)
-    }
+    codegen_crate_path(workspace_root).with_file_name(crate_name)
 }
 
 /// Returns the codegen crate in either supported repository layout.
 pub fn codegen_crate_path(workspace_root: &Path) -> PathBuf {
-    simt_crate_path(workspace_root, "rustc-codegen-cuda")
+    backend_source::codegen_crate_in_checkout(workspace_root)
 }
 
 /// Returns the path to the codegen backend `.so`, building it if necessary.
@@ -1390,11 +1383,22 @@ mod tests {
         let root = tempdir();
         let flat = root.join("crates/rustc-codegen-cuda");
         std::fs::create_dir_all(&flat).unwrap();
+        std::fs::write(flat.join("Cargo.toml"), "[package]\n").unwrap();
         assert_eq!(codegen_crate_path(&root), flat);
 
+        // Switching branches can leave build outputs from the nested layout.
         let nested = root.join("cuda-oxide/crates/rustc-codegen-cuda");
-        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir_all(nested.join("target/debug")).unwrap();
+        assert_eq!(codegen_crate_path(&root), flat);
+        assert_eq!(backend_source::codegen_crate_in_checkout(&root), flat);
+        assert_eq!(
+            simt_crate_path(&root, "cuda-macros"),
+            root.join("crates/cuda-macros")
+        );
+
+        std::fs::write(nested.join("Cargo.toml"), "[package]\n").unwrap();
         assert_eq!(codegen_crate_path(&root), nested);
+        assert_eq!(backend_source::codegen_crate_in_checkout(&root), nested);
         assert_eq!(
             simt_crate_path(&root, "cuda-macros"),
             root.join("cuda-oxide/crates/cuda-macros")
@@ -2325,6 +2329,92 @@ mod tests {
             "{report}"
         );
         assert!(report.contains("CUDA_OXIDE_BACKEND"), "{report}");
+    }
+
+    // A moved dependency must still use the toolchain pin at the repository root.
+    #[test]
+    fn dependency_toolchain_guard_supports_flat_and_nested_checkouts() {
+        let rev = "728539f652ba107800fa13d0c31675f6c11aab9c";
+        let git_source = format!("git+https://github.com/NVIDIA/cuda-rust.git#{rev}");
+        for nested in [false, true] {
+            let root = tempdir();
+            std::fs::write(root.join("Cargo.toml"), "[workspace]\n").unwrap();
+            std::fs::write(
+                root.join("rust-toolchain.toml"),
+                "[toolchain]\nchannel = \"nightly-2026-08-28\"\n",
+            )
+            .unwrap();
+            let simt_root = if nested {
+                root.join("cuda-oxide")
+            } else {
+                root.clone()
+            };
+            let codegen = simt_root.join(CODEGEN_CRATE_SUBDIR);
+            let device = simt_root.join("crates/cuda-device");
+            for (directory, name) in [(&codegen, "rustc_codegen_cuda"), (&device, "cuda-device")] {
+                std::fs::create_dir_all(directory).unwrap();
+                std::fs::write(
+                    directory.join("Cargo.toml"),
+                    format!("[package]\nname = {name:?}\nversion = \"0.0.0\"\n"),
+                )
+                .unwrap();
+            }
+            if nested {
+                assert!(!simt_root.join("Cargo.toml").exists());
+            }
+
+            for (package_source, marker) in [
+                (None, None),
+                (None, Some(".git")),
+                (Some(git_source.as_str()), Some(".cargo-ok")),
+            ] {
+                if let Some(marker) = marker {
+                    std::fs::write(root.join(marker), "").unwrap();
+                }
+                let metadata = serde_json::json!({
+                    "packages": [{
+                        "name": "cuda-device",
+                        "manifest_path": device.join("Cargo.toml"),
+                        "source": package_source,
+                    }],
+                });
+                let resolved = backend_source::dependency_source_from_metadata(&metadata)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(resolved.checkout(), root);
+                assert_eq!(resolved.codegen_crate(), codegen);
+                assert_eq!(resolved.rev(), package_source.map(|_| rev));
+                let channel = backend_source::pinned_channel(resolved.checkout());
+                assert_eq!(channel.as_deref(), Some("nightly-2026-08-28"));
+                let description = resolved.describe();
+                let report = unloadable_backend_report(
+                    &description,
+                    Some("nightly-2026-04-03-x86_64-unknown-linux-gnu"),
+                    channel.as_deref(),
+                )
+                .expect("a dependency built for another nightly must be refused");
+                assert!(
+                    report.contains("needs Rust `nightly-2026-08-28`"),
+                    "{report}"
+                );
+                assert!(
+                    report.contains("using `nightly-2026-04-03-x86_64-unknown-linux-gnu`"),
+                    "{report}"
+                );
+                assert_eq!(
+                    unloadable_backend_report(
+                        &description,
+                        Some("nightly-2026-08-28-x86_64-unknown-linux-gnu"),
+                        channel.as_deref(),
+                    ),
+                    None
+                );
+                if let Some(marker) = marker {
+                    std::fs::remove_file(root.join(marker)).unwrap();
+                }
+            }
+            std::fs::remove_dir_all(root).unwrap();
+        }
     }
 
     /// The commit verdict outranks the source-mtime verdict: the wrong commit

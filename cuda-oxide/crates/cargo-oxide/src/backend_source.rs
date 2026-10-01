@@ -47,7 +47,7 @@ pub const NESTED_CODEGEN_CRATE_SUBDIR: &str = "cuda-oxide/crates/rustc-codegen-c
 /// Returns the codegen crate in either supported repository layout.
 pub fn codegen_crate_in_checkout(root: &Path) -> PathBuf {
     let nested = root.join(NESTED_CODEGEN_CRATE_SUBDIR);
-    if nested.is_dir() {
+    if nested.join("Cargo.toml").is_file() {
         nested
     } else {
         root.join(CODEGEN_CRATE_SUBDIR)
@@ -219,11 +219,9 @@ fn git_source_rev(source: &str) -> Option<&str> {
 fn checkout_root(manifest: &Path) -> Option<PathBuf> {
     let mut dir = manifest.parent()?;
     loop {
-        if dir.join(CODEGEN_CRATE_SUBDIR).join("Cargo.toml").is_file()
-            || dir
-                .join(NESTED_CODEGEN_CRATE_SUBDIR)
-                .join("Cargo.toml")
-                .is_file()
+        // cuda-oxide/ has the crates; its parent owns the workspace and pin.
+        if dir.join("Cargo.toml").is_file()
+            && codegen_crate_in_checkout(dir).join("Cargo.toml").is_file()
         {
             return Some(dir.to_path_buf());
         }
@@ -313,6 +311,11 @@ mod tests {
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::write(dir.join("Cargo.toml"), "[package]\n").unwrap();
         }
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"crates/*\"]\nexclude = [\"crates/rustc-codegen-cuda\"]\n",
+        )
+        .unwrap();
         root.join("crates").join(crate_name).join("Cargo.toml")
     }
 
@@ -494,6 +497,11 @@ mod tests {
         // A plain git clone is bounded the same way.
         std::fs::remove_file(trimmed.join(".cargo-ok")).unwrap();
         std::fs::create_dir_all(trimmed.join(".git")).unwrap();
+        assert_eq!(checkout_root(&manifest), None);
+
+        // Worktrees use a .git file instead of a directory.
+        std::fs::remove_dir(trimmed.join(".git")).unwrap();
+        std::fs::write(trimmed.join(".git"), "gitdir: /unused\n").unwrap();
         assert_eq!(checkout_root(&manifest), None);
 
         // The marker directory itself is still eligible when it has the crate.

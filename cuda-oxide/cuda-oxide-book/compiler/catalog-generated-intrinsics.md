@@ -277,7 +277,7 @@ Finally, run the normal checks required by the files you changed. For changes
 that also update the book:
 
 ```bash
-just book
+just -f cuda-oxide/Justfile book
 bash cuda-oxide/scripts/check-book-api-names.sh
 git diff --check
 ```
