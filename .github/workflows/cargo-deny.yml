@@ -46,8 +46,9 @@ jobs:
       # lock still exits 0 here and leaves the file rewritten, while --locked
       # stops with "cannot update the lock file". The other two runs below and
       # in cuda-oxide/scripts/ already pass it.
+      # Find deny.toml through a SIMT member; --workspace checks all root members.
       - name: Run cargo-deny
-        run: cargo deny --locked check --config cuda-oxide/deny.toml
+        run: cargo deny --manifest-path cuda-oxide/crates/cargo-oxide/Cargo.toml --workspace --locked check
 
       # cuda-oxide/crates/rustc-codegen-cuda carries its own `[workspace]` for the
       # rustc-private dylibs, so the run above stops at that boundary and never

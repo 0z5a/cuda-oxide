@@ -222,7 +222,8 @@ check-guards:
     bash scripts/check-host-api-paths.sh
     bash scripts/check-shared-crate-pin.sh
     bash scripts/check-oxide-artifacts-parity.sh
-    cargo deny --manifest-path ../Cargo.toml --locked check --config deny.toml
+    # Find deny.toml through a SIMT member; --workspace checks all root members.
+    cargo deny --manifest-path crates/cargo-oxide/Cargo.toml --workspace --locked check
     cargo deny --manifest-path crates/rustc-codegen-cuda/Cargo.toml --locked check
     cargo deny --manifest-path crates/cuda-macros/tests/device-only/Cargo.toml --locked check
     bash scripts/check-dependency-licenses.sh
