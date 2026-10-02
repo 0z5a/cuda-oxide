@@ -28,6 +28,14 @@ jobs:
       - name: Clone repository
         uses: actions/checkout@v4
 
+      # Oxide example compile never reads the imported cutile-rs tree, but the
+      # checkout shares the GitHub-hosted runner's ~14 GB disk with the CUDA
+      # toolkit, LLVM, cargo-oxide, and ~200 example workspaces. Leaving
+      # cutile-rs in place fills that disk mid-smoketest: later examples then
+      # fail rebuilding rustc-codegen-cuda with ENOSPC / ld bus errors.
+      - name: Drop cutile-rs from this job's workspace
+        run: rm -rf cutile-rs
+
       # Every example workspace must pin the same dependency versions. The
       # shared CARGO_TARGET_DIR below keys build caches on the resolved
       # dependency subtree, so one drifted Cargo.lock silently costs a full
@@ -35,7 +43,7 @@ jobs:
       # example -- a 15-70s spike in an otherwise ~2s-per-example run.
       # Fails fast, before any toolkit install.
       - name: Example lockfiles resolve identical dependency versions
-        run: bash scripts/sync-example-locks.sh --check
+        run: bash cuda-oxide/scripts/sync-example-locks.sh --check
 
       # Needed for cuda.h and curand.h: bindgen runs in the shared
       # cuda-bindings build script. Same setup as unit-tests.yml / clippy.yml.
@@ -95,13 +103,16 @@ jobs:
           # the backend .so at its fixed discovery path.
           CARGO_TARGET_DIR: ${{ runner.temp }}/examples-shared-target
           SMOKETEST_LOG_DIR: ${{ runner.temp }}/smoketest-logs
+          # rustc incremental dirs under rustc-codegen-cuda/target/ are what
+          # filled the runner once cutile-rs was in the checkout.
+          CARGO_INCREMENTAL: "0"
         run: |
           set -euo pipefail
           sysroot="$(rustc --print sysroot)"
           export LIBRARY_PATH="${sysroot}/lib:${LIBRARY_PATH:-}"
           export LD_LIBRARY_PATH="${sysroot}/lib:${LD_LIBRARY_PATH:-}"
 
-          scripts/smoketest.sh --compile-only --no-color
+          cuda-oxide/scripts/smoketest.sh --compile-only --no-color
 
       - name: Artifact modes keep shared Cargo dependencies fresh
         timeout-minutes: 10
@@ -109,6 +120,7 @@ jobs:
           CUDA_TOOLKIT_PATH: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}
           CUDA_OXIDE_LLC: /usr/bin/llc-22
           CARGO_TARGET_DIR: ${{ runner.temp }}/examples-shared-target
+          CARGO_INCREMENTAL: "0"
         run: |
           set -euo pipefail
           sysroot="$(rustc --print sysroot)"
