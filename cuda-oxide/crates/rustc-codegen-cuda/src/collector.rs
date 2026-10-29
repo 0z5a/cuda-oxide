@@ -727,7 +727,7 @@ fn truncate_path_for_box(fn_path: &str, width: usize) -> String {
 /// We never actually run `std` here: mir-importer rewrites each of these
 /// names to the matching NVIDIA libdevice function (`__nv_tan`, `__nv_sinh`,
 /// ...). This list just tells the guard "these are fine, we handle them."
-/// Keep it in sync with the `std::sys::cmath` matches in float_math.rs.
+/// The same generated shard owns importer dispatch and this exact allow-list.
 ///
 /// A few functions (`sin`, `cos`, `exp`, ...) take a different, allowed route
 /// on this toolchain: the compiler lowers them to a builtin in `core`, so
@@ -736,47 +736,7 @@ fn truncate_path_for_box(fn_path: &str, width: usize) -> String {
 /// case a build ever takes the `std` route too. Only `std::`-prefixed names
 /// belong here; `core`-based shims are already allowed.
 fn is_intrinsic_lowered_cmath_shim(fn_path: &str) -> bool {
-    matches!(
-        fn_path,
-        "std::sys::cmath::sinf"
-            | "std::sys::cmath::sin"
-            | "std::sys::cmath::cosf"
-            | "std::sys::cmath::cos"
-            | "std::sys::cmath::tanf"
-            | "std::sys::cmath::tan"
-            | "std::sys::cmath::asinf"
-            | "std::sys::cmath::asin"
-            | "std::sys::cmath::acosf"
-            | "std::sys::cmath::acos"
-            | "std::sys::cmath::atan2f"
-            | "std::sys::cmath::atan2"
-            | "std::sys::cmath::atanf"
-            | "std::sys::cmath::atan"
-            | "std::sys::cmath::cbrtf"
-            | "std::sys::cmath::cbrt"
-            | "std::sys::cmath::sinhf"
-            | "std::sys::cmath::sinh"
-            | "std::sys::cmath::coshf"
-            | "std::sys::cmath::cosh"
-            | "std::sys::cmath::tanhf"
-            | "std::sys::cmath::tanh"
-            // Inverse hyperbolics: on this nightly (rustc e457a7b0d) only
-            // asinh/acosh are `std::sys::cmath` shims; atanh is still the
-            // pure-Rust `ln_1p` formula and cmath declares no atanh, so its
-            // entries are defensive, for when std makes the same move.
-            | "std::sys::cmath::asinhf"
-            | "std::sys::cmath::asinh"
-            | "std::sys::cmath::acoshf"
-            | "std::sys::cmath::acosh"
-            | "std::sys::cmath::atanhf"
-            | "std::sys::cmath::atanh"
-            | "std::sys::cmath::expm1f"
-            | "std::sys::cmath::expm1"
-            | "std::sys::cmath::log1pf"
-            | "std::sys::cmath::log1p"
-            | "std::sys::cmath::hypotf"
-            | "std::sys::cmath::hypot"
-    )
+    dialect_mir::rust_intrinsics::is_intrinsic_lowered_cmath_shim(fn_path)
 }
 
 /// `std`'s inherent float methods: `std::f32::<impl f32>::atan` and friends.
@@ -795,9 +755,9 @@ fn is_intrinsic_lowered_cmath_shim(fn_path: &str) -> bool {
 ///
 /// Nothing in these wrappers touches the OS or the heap, so collect them like
 /// any other reachable pure function. Every stable method's shim is in
-/// `is_intrinsic_lowered_cmath_shim`; the unstable `gamma`/`erf` family and
-/// `f128` still stop one level deeper, at their shim, with the guard naming
-/// that shim.
+/// `is_intrinsic_lowered_cmath_shim`; `gamma` is also intercepted for f32/f64.
+/// Unsupported methods such as `erf`, and f128 shims, still stop one level
+/// deeper with the guard naming that shim.
 fn is_std_float_inherent_method(fn_path: &str) -> bool {
     ["f16", "f32", "f64", "f128"]
         .iter()
@@ -2429,7 +2389,7 @@ impl<'tcx> DeviceCollector<'tcx> {
         // implementations (e.g. `libm::math::generic::sqrt::sqrt_round`) would
         // both be wasted work and trip importer gaps. Skip the whole crate; any
         // libm function we don't yet intercept will surface as a missing symbol,
-        // signalling that `from_libm_path` needs another entry.
+        // signalling that the libdevice math shard needs another row.
         if name_str == "libm" {
             return CollectDecision::SkipIntentional;
         }
@@ -3220,6 +3180,26 @@ mod tests {
         PTX_MERGE_REQUIRED_PREFIX, is_ptx_merge_required_marker, ptx_merge_required_marker,
     };
     use rustc_middle::mir::BasicBlock;
+
+    #[test]
+    fn special_math_cmath_shims_are_an_exact_allowlist() {
+        for path in ["std::sys::cmath::tgammaf", "std::sys::cmath::tgamma"] {
+            assert!(super::is_intrinsic_lowered_cmath_shim(path), "{path}");
+        }
+        for path in [
+            "user::std::sys::cmath::tgamma",
+            "std::sys::cmath::tgammaf128",
+            "std::sys::cmath::lgamma_r",
+            "std::sys::cmath::frexp",
+            "std::sys::cmath::erf",
+            "std::io::stdio::_print",
+        ] {
+            assert!(!super::is_intrinsic_lowered_cmath_shim(path), "{path}");
+        }
+        assert!(super::is_intrinsic_lowered_cmath_shim(
+            "std::sys::cmath::hypot"
+        ));
+    }
 
     #[test]
     fn std_float_wrappers_are_collected_not_forbidden() {
