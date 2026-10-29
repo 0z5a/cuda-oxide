@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Generated constants without captured source spans use their containing
   function definition, retaining exact user-expression locations and nested
   cross-file inline caller chains.
-
+- Generated short-circuit and folded constants now use the original expression's
+  source location, preserving inlined helper scopes and call chains.
 - Const-generic array bindings retain their function or method signature as
   their source origin, and generated reduction bodies retain the reduction
   call's location and inline chain.
