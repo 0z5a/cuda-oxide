@@ -120,7 +120,7 @@ fn unroll_kind(factor: u32) -> String {
 /// A hint op's source position as `file:line:column`, the form editors and
 /// terminals turn into a link. Returns `None` when the op does not carry a
 /// single position in a file.
-fn hint_location(ctx: &Context, op: Ptr<Operation>) -> Option<String> {
+pub(crate) fn hint_location(ctx: &Context, op: Ptr<Operation>) -> Option<String> {
     match op.deref(ctx).loc() {
         Location::SrcPos {
             src: Source::File(path),
@@ -333,28 +333,6 @@ pub fn unroll_annotated_loops(
                 break;
             };
             let kind = unroll_kind(factor);
-
-            if factor == u32::MAX - 1 {
-                let _ = take_loop_hints(ctx, &hints, &info, loop_id);
-                let lp = &info.loops()[loop_id];
-                let header = lp.header;
-                let mut backedges = Vec::new();
-                for &block in &lp.blocks {
-                    let tail = block.deref(ctx).get_tail();
-                    if let Some(term) = tail
-                        && Operation::get_op::<MirGotoOp>(term, ctx).is_some()
-                        && term.deref(ctx).successors().any(|succ| succ == header)
-                    {
-                        backedges.push(term);
-                    }
-                }
-                for term in backedges {
-                    MirGotoOp::new(term).set_loop_unroll_disable(ctx);
-                }
-                function_changed = true;
-                changed = true;
-                continue;
-            }
 
             let Some(ph) = info.preheader(ctx, region, loop_id) else {
                 // The author asked for unrolling; never silently do nothing.
@@ -1703,7 +1681,7 @@ fn append_cmp(
 }
 
 /// All function ops in the module (each `mir.func`).
-fn collect_functions(module: Ptr<Operation>, ctx: &Context) -> Vec<Ptr<Operation>> {
+pub(crate) fn collect_functions(module: Ptr<Operation>, ctx: &Context) -> Vec<Ptr<Operation>> {
     let mut out = Vec::new();
     let module_region = module.deref(ctx).get_region(0);
     let blocks: Vec<Ptr<BasicBlock>> = module_region.deref(ctx).iter(ctx).collect();
