@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Tile and SIMT share `cuda_async` operations, scheduling, futures and launch
+  marshalling; the separate `cuda_async::simt` namespace is removed. Raw launch
+  packets require unsafe finalization before scheduling. Generic scalar Tile
+  parameters require `DeviceCopy` alongside `DType`.
+- Dropping a host future returns without waiting for GPU work. Submissions
+  retain allocations and access leases independently through completion,
+  including graph replay and partial-error paths.
+
 ### Fixed
 
 - Retiring tensor completion leases retain allocation access independently of
@@ -130,7 +140,7 @@ paths have lower overhead.
   globals, and module producer metadata. Existing signatures are preserved
   (#298).
 - Unsafe per-launch `programmatic_dependent_launch()` on generated builders
-  and `AsyncKernelLaunch`, with runtime driver entry-point lookup
+  and `AsyncKernelLaunchBuilder`, with runtime driver entry-point lookup
   (Tile IR 13.4, `sm_90+`) (#298).
 - Tile IR 13.4 bytecode with assembler version negotiation. Version and
   architecture checks run before JIT assembly. The writer preserves
@@ -254,7 +264,7 @@ on 0.3.0.
   returns `Result<(), DeviceError>`.
 - Generated kernel launchers return a nameable `Launcher<…, KernelArgs<…>>`
   instead of `impl DeviceOp` and implement `GraphNode` only when every input
-  does; `AsyncKernelLaunch::args` is no longer public.
+  does; `AsyncKernelLaunchBuilder::args` is no longer public.
 - `TrialLog::open` takes a `LogProvenance` (`experimental-tune`).
 - `BytecodeVersion::V13_1` is removed; the bytecode floor is CUDA 13.2.
 - Kernel programs: a `return` below the function body and a `break` inside

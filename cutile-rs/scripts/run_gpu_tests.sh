@@ -281,6 +281,9 @@ done
 run_gpu_step "shared Tile and SIMT host buffer interop" \
     gpu_test tile cutile shared_host_buffers --serial
 
+run_gpu_step "shared async Tile and SIMT graph replay" \
+    gpu_test tile cutile shared_async_runtime --serial
+
 print_summary_and_exit \
     "All GPU tests passed!" \
     "Some GPU tests failed. See output above for details."

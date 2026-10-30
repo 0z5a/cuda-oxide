@@ -39,7 +39,7 @@ alongside the normal host binary.
 ## `cuda-async`
 
 The async execution layer, a crate shared with cutile-rs and maintained at
-the repository root (`cuda-async/`). The cuda-oxide model lives under `cuda_async::simt`:
+the repository root (`cuda-async/`). Tile and SIMT share the same types:
 `DeviceOperation` (lazy GPU work description), `DeviceFuture` (stream-bound
 execution), and `DeviceBox<T>` (device-owned memory). Compose work with
 `zip!`, `and_then`, and `value()`.
