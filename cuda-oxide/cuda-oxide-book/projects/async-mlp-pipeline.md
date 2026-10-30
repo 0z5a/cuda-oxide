@@ -76,7 +76,7 @@ The `Cargo.toml` pulls in exactly the crates we need:
 ```toml
 [dependencies]
 cuda-device   = { path = "../../../cuda-device" }       # #[kernel], DisjointSlice, thread::*
-cuda-core     = "0.3.1"                                 # shared with cutile-rs: CudaModule, simt::LaunchConfig
+cuda-core     = "0.3.1"                                 # shared with cutile-rs: CudaModule, LaunchConfig
 cuda-async    = "0.3.1"                                 # shared with cutile-rs: simt::DeviceOperation, zip!, and_then
 tokio       = { version = "1", features = ["rt", "macros"] }
 ```

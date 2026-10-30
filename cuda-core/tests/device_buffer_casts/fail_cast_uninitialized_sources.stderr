@@ -16,7 +16,7 @@ error[E0277]: the trait bound `MaybeUninit<u32>: NoUninit` is not satisfied
            and $N others
    = note: required for `MaybeUninit<u32>` to implement `NoUninit`
 note: required by a bound in `DeviceBuffer::<T>::cast_elem`
-  --> src/simt/device_buffer.rs
+  --> src/device_buffer.rs
    |
    |     pub fn cast_elem<A: AnyBitPattern>(self) -> DeviceBuffer<A>
    |            --------- required by a bound in this associated function
@@ -42,7 +42,7 @@ error[E0277]: the trait bound `MaybeUninit<u32>: NoUninit` is not satisfied
            and $N others
    = note: required for `MaybeUninit<u32>` to implement `NoUninit`
 note: required by a bound in `DeviceBuffer::<T>::cast_chunks`
-  --> src/simt/device_buffer.rs
+  --> src/device_buffer.rs
    |
    |     pub fn cast_chunks<A: AnyBitPattern>(self) -> Result<DeviceBuffer<A>, Self>
    |            ----------- required by a bound in this associated function
@@ -73,7 +73,7 @@ help: the trait `Pod` is not implemented for `Padded`
            and $N others
    = note: required for `Padded` to implement `NoUninit`
 note: required by a bound in `DeviceBuffer::<T>::cast_elem`
-  --> src/simt/device_buffer.rs
+  --> src/device_buffer.rs
    |
    |     pub fn cast_elem<A: AnyBitPattern>(self) -> DeviceBuffer<A>
    |            --------- required by a bound in this associated function
@@ -104,7 +104,7 @@ help: the trait `Pod` is not implemented for `Padded`
            and $N others
    = note: required for `Padded` to implement `NoUninit`
 note: required by a bound in `DeviceBuffer::<T>::cast_chunks`
-  --> src/simt/device_buffer.rs
+  --> src/device_buffer.rs
    |
    |     pub fn cast_chunks<A: AnyBitPattern>(self) -> Result<DeviceBuffer<A>, Self>
    |            ----------- required by a bound in this associated function

@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Retiring tensor completion leases retain allocation access independently of
+  user-visible buffer views. Converting a uniquely owned tensor into a buffer
+  no longer reports a false alias while completion retirement is pending.
 - Safe `DeviceBuffer` element and chunk casts require `NoUninit` on the source,
   preventing `MaybeUninit` elements or struct padding from becoming initialized
   destination values. Boolean-to-byte casts remain supported.
@@ -50,6 +53,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Advance the lockstep Tile and shared host crates to v0.5.0 for the breaking
   safety-contract and host-runtime changes.
+- Tile and SIMT now share the `cuda-core` context, stream, event, module, launch
+  configuration, and allocation types. Replace `cuda_core::simt` imports with
+  crate-root imports; use `Context` for context ownership and `Device` for a
+  physical GPU identity. Foreign allocations must provide their actual context.
+- Typed buffers and tensors can share allocations without copying through
+  `Tensor::from_buffer`, `Tensor::into_buffer`, and contiguous borrowed buffer
+  views. Views share context identity, byte offsets, and access exclusion.
+  Completion leases retain allocations after early drops and forgotten launches;
+  buffer and stream cleanup no longer waits for GPU work on the dropping thread.
+- Tile numeric storage wrappers implement `DeviceCopy` alongside `DType`; the
+  traits remain independent and packed FP4 keeps its byte storage representation.
 - `CompileOptions` uses one `CodegenMode` for device debugging and optimization.
   The last `debug_info(...)` or `opt_level(...)` setter wins; full debugging
   always uses optimization level zero. Replace `device_debug(true)` with

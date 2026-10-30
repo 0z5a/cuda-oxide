@@ -26,7 +26,7 @@ use crate::model::Batch;
 use crate::operator::Result;
 use ctm_rs::memory::{DisjointSlice, DynamicSharedArray};
 use ctm_rs::{cuda_module, kernel, launch_bounds, thread};
-use cuda_core::simt::LaunchConfig;
+use cuda_core::LaunchConfig;
 use cuda_core::{CudaStream, DeviceBuffer};
 use cute_rs::arch::NamedBarrier;
 use cute_rs::block_scaled::{

@@ -10,7 +10,7 @@
 //! uninitialized source bytes into initialized values. These cases only need to
 //! compile or fail to compile; none touches a GPU. Regenerate the
 //! expectations with `TRYBUILD=overwrite cargo test -p cuda-core --test
-//! simt_device_buffer_casts` after an intentional diagnostic change.
+//! device_buffer_casts` after an intentional diagnostic change.
 
 #[test]
 fn device_buffer_cast_bounds() {
