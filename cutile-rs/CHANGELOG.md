@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Generated kernel entry setup and assumptions now use the user function's
+  signature as their source location, preserving the inlined body's own
+  statement locations and helper scopes.
 - Generated constants without captured source spans use their containing
   function definition, retaining exact user-expression locations and nested
   cross-file inline caller chains.
